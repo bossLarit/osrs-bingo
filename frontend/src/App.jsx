@@ -14,6 +14,7 @@ import Stats from './components/Stats';
 import TeamChat from './components/TeamChat';
 import PotDisplay from './components/PotDisplay';
 import BingoTimer from './components/BingoTimer';
+import { apiUrl } from './api';
 
 function App() {
   const [activeTab, setActiveTab] = useState('bingo');
@@ -59,9 +60,9 @@ function App() {
   const fetchData = async () => {
     try {
       const [teamsRes, tilesRes, progressRes] = await Promise.all([
-        fetch('/api/teams'),
-        fetch('/api/tiles'),
-        fetch('/api/progress')
+        fetch(apiUrl('/api/teams')),
+        fetch(apiUrl('/api/tiles')),
+        fetch(apiUrl('/api/progress'))
       ]);
       
       const teamsData = await teamsRes.json();
@@ -144,7 +145,7 @@ function App() {
   const syncWithWOM = async () => {
     setSyncing(true);
     try {
-      await fetch('/api/sync', { method: 'POST' });
+      await fetch(apiUrl('/api/sync'), { method: 'POST' });
       await fetchData();
     } catch (error) {
       console.error('Error syncing:', error);
@@ -222,12 +223,8 @@ function App() {
             🎲 OSRS Bingo
           </h1>
           <p className="text-osrs-border text-lg mb-4">Battle Royale Bingo Card</p>
-          
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-4">
-            <BingoTimer onBingoStart={fetchData} />
-            <div className="max-w-sm">
-              <PotDisplay />
-            </div>
+          <div className="max-w-sm mx-auto">
+            <PotDisplay />
           </div>
         </header>
 

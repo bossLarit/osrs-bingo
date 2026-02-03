@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Image, RefreshCw } from 'lucide-react';
+import { apiUrl } from '../api';
 
 function LiveFeed() {
   const [proofs, setProofs] = useState([]);
@@ -15,7 +16,7 @@ function LiveFeed() {
 
   const fetchApprovedProofs = async () => {
     try {
-      const res = await fetch('/api/proofs/approved');
+      const res = await fetch(apiUrl('/api/proofs/approved'));
       const data = await res.json();
       setProofs(data);
     } catch (error) {

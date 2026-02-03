@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BarChart3, Trophy, Award, Star, TrendingUp, Download, Clock } from 'lucide-react';
+import { apiUrl } from '../api';
 
 function Stats({ teams, tiles, progress }) {
   const [history, setHistory] = useState([]);
@@ -14,10 +15,10 @@ function Stats({ teams, tiles, progress }) {
   const fetchStats = async () => {
     try {
       const [historyRes, achievementsRes, mvpRes, configRes] = await Promise.all([
-        fetch('/api/history'),
-        fetch('/api/achievements'),
-        fetch('/api/mvp'),
-        fetch('/api/config')
+        fetch(apiUrl('/api/history')),
+        fetch(apiUrl('/api/achievements')),
+        fetch(apiUrl('/api/mvp')),
+        fetch(apiUrl('/api/config'))
       ]);
       
       setHistory(await historyRes.json());
@@ -31,7 +32,7 @@ function Stats({ teams, tiles, progress }) {
 
   const exportData = async () => {
     try {
-      const res = await fetch('/api/export');
+      const res = await fetch(apiUrl('/api/export'));
       const data = await res.json();
       
       // Download as JSON
@@ -49,7 +50,7 @@ function Stats({ teams, tiles, progress }) {
 
   const exportCSV = async () => {
     try {
-      const res = await fetch('/api/export');
+      const res = await fetch(apiUrl('/api/export'));
       const data = await res.json();
       
       // Convert to CSV

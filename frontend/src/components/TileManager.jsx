@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Plus, Trash2, Edit2, Save, X, Upload, Download, RefreshCw } from 'lucide-react';
+import { apiUrl } from '../api';
 
 const TILE_TYPES = [
   { value: 'kills', label: 'Boss Kills' },
@@ -252,7 +253,7 @@ function TileManager({ tiles, teams, onUpdate }) {
 
   const updateProgress = async (tileId, teamId, value, completed) => {
     try {
-      await fetch('/api/progress', {
+      await fetch(apiUrl('/api/progress'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -322,7 +323,7 @@ function TileManager({ tiles, teams, onUpdate }) {
     }));
     
     try {
-      await fetch('/api/tiles/bulk', {
+      await fetch(apiUrl('/api/tiles/bulk'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tiles: bossTiles })
@@ -341,7 +342,7 @@ function TileManager({ tiles, teams, onUpdate }) {
     
     setLoading(true);
     try {
-      await fetch('/api/tiles/all', { method: 'DELETE' });
+      await fetch(apiUrl('/api/tiles/all'), { method: 'DELETE' });
       onUpdate();
     } catch (error) {
       console.error('Error deleting all tiles:', error);
@@ -355,7 +356,7 @@ function TileManager({ tiles, teams, onUpdate }) {
     if (!name) return;
     
     try {
-      const res = await fetch('/api/boards', {
+      const res = await fetch(apiUrl('/api/boards'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name })
@@ -370,7 +371,7 @@ function TileManager({ tiles, teams, onUpdate }) {
 
   const loadBoard = async () => {
     try {
-      const res = await fetch('/api/boards');
+      const res = await fetch(apiUrl('/api/boards'));
       const boards = await res.json();
       if (boards.length === 0) {
         alert('Ingen gemte boards fundet');
@@ -573,8 +574,8 @@ function TileManager({ tiles, teams, onUpdate }) {
                   <label className="block text-osrs-brown mb-1 text-sm">Mål Værdi</label>
                   <input
                     type="number"
-                    value={formData.target_value || ''}
-                    onChange={(e) => setFormData({ ...formData, target_value: parseInt(e.target.value) || 1 })}
+                    value={formData.target_value}
+                    onChange={(e) => setFormData({ ...formData, target_value: parseInt(e.target.value) })}
                     className="input-osrs w-full rounded"
                     min={1}
                   />
@@ -583,8 +584,8 @@ function TileManager({ tiles, teams, onUpdate }) {
                   <label className="block text-osrs-brown mb-1 text-sm">Points</label>
                   <input
                     type="number"
-                    value={formData.points || ''}
-                    onChange={(e) => setFormData({ ...formData, points: parseInt(e.target.value) || 1 })}
+                    value={formData.points}
+                    onChange={(e) => setFormData({ ...formData, points: parseInt(e.target.value) })}
                     className="input-osrs w-full rounded"
                     min={1}
                   />
@@ -593,8 +594,8 @@ function TileManager({ tiles, teams, onUpdate }) {
                   <label className="block text-osrs-brown mb-1 text-sm">Position</label>
                   <input
                     type="number"
-                    value={formData.position ?? ''}
-                    onChange={(e) => setFormData({ ...formData, position: parseInt(e.target.value) || 0 })}
+                    value={formData.position}
+                    onChange={(e) => setFormData({ ...formData, position: parseInt(e.target.value) })}
                     className="input-osrs w-full rounded"
                     min={0}
                   />

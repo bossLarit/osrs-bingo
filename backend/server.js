@@ -3,10 +3,6 @@ import cors from 'cors';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { config } from 'dotenv';
-
-// Load environment variables
-config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,15 +25,13 @@ const defaultData = {
     name: 'OSRS Bingo', 
     grid_size: 7, 
     active: true, 
-    admin_password: process.env.ADMIN_PASSWORD || 'changeme',
+    admin_password: 'admin123',
     event_start: null,
     event_end: null,
-    event_duration_hours: 168,
     sounds_enabled: true,
     dark_mode: false,
     pot_value: 100000000,
-    pot_donor: 'Anonym',
-    bingo_started: false
+    pot_donor: 'Anonym'
   },
   boards: [],
   proofs: [],
@@ -46,7 +40,6 @@ const defaultData = {
   actionLog: [],
   chatMessages: [],
   tileVotes: {},
-  playerBaselines: {},
   nextIds: { team: 1, player: 1, tile: 1, progress: 1, board: 1, proof: 1, chat: 1 }
 };
 
@@ -66,16 +59,6 @@ function saveDB(data) {
 }
 
 let db = loadDB();
-
-// Always use environment variable for admin password if available
-function getAdminPassword() {
-  return process.env.ADMIN_PASSWORD || db.config.admin_password || 'changeme';
-}
-
-// Override db password with env variable on startup
-if (process.env.ADMIN_PASSWORD) {
-  db.config.admin_password = process.env.ADMIN_PASSWORD;
-}
 
 // ============ TEAM ROUTES ============
 
@@ -483,202 +466,32 @@ app.post('/api/wom/player/:username/update', async (req, res) => {
   }
 });
 
-// Sync player data from WOM and update tile progress (using BASELINE comparison)
+// Sync player data from WOM
 app.post('/api/sync', async (req, res) => {
   try {
     const results = [];
-    const playerCurrentStats = {};
     
-    if (!db.playerBaselines) db.playerBaselines = {};
-    const hasBaselines = Object.keys(db.playerBaselines).length > 0;
-    
-    // Fetch current stats for all players from WOM
     for (const player of db.players) {
       try {
-        const response = await fetch(
-          `https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`
-        );
-        
+        const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
         if (response.ok) {
           const data = await response.json();
-          playerCurrentStats[player.username.toLowerCase()] = {
-            skills: data.latestSnapshot?.data?.skills || {},
-            bosses: data.latestSnapshot?.data?.bosses || {},
-            activities: data.latestSnapshot?.data?.activities || {}
-          };
-          results.push({ username: player.username, success: true });
-        } else {
-          results.push({ username: player.username, success: false, error: 'Player not found' });
-        }
-      } catch (e) {
-        results.push({ username: player.username, success: false, error: e.message });
-      }
-      await new Promise(resolve => setTimeout(resolve, 150));
-    }
-    
-    // Update progress for each team based on gains from baseline
-    for (const team of db.teams) {
-      const teamPlayers = db.players.filter(p => p.team_id === team.id);
-      
-      for (const tile of db.tiles) {
-        let totalValue = 0;
-        
-        // Calculate total gained value from all team players
-        for (const player of teamPlayers) {
-          const username = player.username.toLowerCase();
-          const current = playerCurrentStats[username];
-          const baseline = db.playerBaselines[username];
-          
-          if (!current) continue;
-          
-          // Get value based on tile type and metric
-          if (tile.type === 'xp' && tile.metric) {
-            const skillName = tile.metric.toLowerCase();
-            const currentXP = current.skills?.[skillName]?.experience || 0;
-            const baselineXP = baseline?.skills?.[skillName]?.experience || 0;
-            const gained = hasBaselines ? Math.max(0, currentXP - baselineXP) : currentXP;
-            totalValue += gained;
-          } else if (tile.type === 'level' && tile.metric) {
-            const skillName = tile.metric.toLowerCase();
-            const currentLevel = current.skills?.[skillName]?.level || 0;
-            const baselineLevel = baseline?.skills?.[skillName]?.level || 0;
-            const gained = hasBaselines ? Math.max(0, currentLevel - baselineLevel) : currentLevel;
-            totalValue += gained;
-          } else if (tile.type === 'kills' && tile.metric) {
-            const bossName = tile.metric.toLowerCase();
-            const currentKills = current.bosses?.[bossName]?.kills || 0;
-            const baselineKills = baseline?.bosses?.[bossName]?.kills || 0;
-            const gained = hasBaselines ? Math.max(0, currentKills - baselineKills) : currentKills;
-            totalValue += gained;
+          if (data.id) {
+            player.wom_id = data.id;
           }
-        }
-        
-        // Update or create progress entry
-        let progress = db.progress.find(p => p.team_id === team.id && p.tile_id === tile.id);
-        if (!progress) {
-          progress = {
-            id: db.nextIds.progress++,
-            team_id: team.id,
-            tile_id: tile.id,
-            current_value: 0,
-            completed: false
-          };
-          db.progress.push(progress);
-        }
-        
-        progress.current_value = totalValue;
-        progress.completed = totalValue >= (tile.target_value || 1);
-      }
-    }
-    
-    saveDB(db);
-    res.json({ 
-      success: true, 
-      players: results, 
-      using_baselines: hasBaselines,
-      message: hasBaselines ? 'Progress updated from baseline' : 'Progress updated (no baseline - showing totals)'
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ START BINGO ============
-
-// Start bingo - capture baseline stats for all players
-app.post('/api/bingo/start', async (req, res) => {
-  try {
-    const { admin_password, duration_hours } = req.body;
-    if (admin_password !== db.config.admin_password) {
-      return res.status(401).json({ error: 'Invalid password' });
-    }
-
-    const results = [];
-    if (!db.playerBaselines) db.playerBaselines = {};
-
-    // Fetch current stats for all players as baseline
-    for (const player of db.players) {
-      try {
-        const response = await fetch(
-          `https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          
-          // Store baseline stats
-          db.playerBaselines[player.username.toLowerCase()] = {
-            captured_at: new Date().toISOString(),
-            skills: data.latestSnapshot?.data?.skills || {},
-            bosses: data.latestSnapshot?.data?.bosses || {},
-            activities: data.latestSnapshot?.data?.activities || {}
-          };
-          
-          results.push({ username: player.username, success: true });
+          results.push({ username: player.username, success: true, data });
         } else {
           results.push({ username: player.username, success: false, error: 'Player not found' });
         }
       } catch (e) {
         results.push({ username: player.username, success: false, error: e.message });
       }
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Rate limiting - wait 100ms between requests
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
-
-    // Set event times
-    const now = new Date();
-    const hours = duration_hours || db.config.event_duration_hours || 168;
-    const endTime = new Date(now.getTime() + hours * 60 * 60 * 1000);
     
-    db.config.event_start = now.toISOString();
-    db.config.event_end = endTime.toISOString();
-    db.config.bingo_started = true;
-
-    // Clear all existing progress
-    db.progress = [];
-
     saveDB(db);
-    res.json({ 
-      success: true, 
-      players: results, 
-      event_start: db.config.event_start,
-      event_end: db.config.event_end,
-      message: `Bingo started! Baselines captured for ${results.filter(r => r.success).length} players`
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Reset/Stop bingo
-app.post('/api/bingo/reset', (req, res) => {
-  try {
-    const { admin_password } = req.body;
-    if (admin_password !== db.config.admin_password) {
-      return res.status(401).json({ error: 'Invalid password' });
-    }
-
-    db.config.event_start = null;
-    db.config.event_end = null;
-    db.config.bingo_started = false;
-    db.playerBaselines = {};
-    db.progress = [];
-
-    saveDB(db);
-    res.json({ success: true, message: 'Bingo reset' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get bingo status
-app.get('/api/bingo/status', (req, res) => {
-  try {
-    res.json({
-      started: db.config.bingo_started || false,
-      event_start: db.config.event_start,
-      event_end: db.config.event_end,
-      baselines_count: Object.keys(db.playerBaselines || {}).length
-    });
+    res.json(results);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

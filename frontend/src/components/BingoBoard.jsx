@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import BingoTile from './BingoTile';
+import { apiUrl } from '../api';
 
 function BingoBoard({ tiles, teams, progress, onRefresh }) {
   const [hoveredTile, setHoveredTile] = useState(null);
@@ -17,7 +18,7 @@ function BingoBoard({ tiles, teams, progress, onRefresh }) {
 
   const fetchVotes = async () => {
     try {
-      const res = await fetch('/api/votes');
+      const res = await fetch(apiUrl('/api/votes'));
       const data = await res.json();
       setVotes(data);
     } catch (error) {
@@ -41,7 +42,7 @@ function BingoBoard({ tiles, teams, progress, onRefresh }) {
     }
 
     try {
-      await fetch('/api/votes', {
+      await fetch(apiUrl('/api/votes'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

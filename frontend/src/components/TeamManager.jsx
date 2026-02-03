@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Trash2, UserPlus, X, Shuffle, Users, Scale } from 'lucide-react';
 import ImageUpload from './ImageUpload';
+import { apiUrl } from '../api';
 
 function TeamManager({ teams, onUpdate }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -36,7 +37,7 @@ function TeamManager({ teams, onUpdate }) {
     
     setLoading(true);
     try {
-      await fetch('/api/teams', {
+      await fetch(apiUrl('/api/teams'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newTeamName, color: newTeamColor, logo_url: newTeamLogo })

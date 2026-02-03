@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Send, MessageSquare, Clock, Check, X } from 'lucide-react';
 import ImageUpload from './ImageUpload';
+import { apiUrl } from '../api';
 
 function ProofSubmit({ tiles, teams, onUpdate }) {
   const [proofs, setProofs] = useState([]);
@@ -21,7 +22,7 @@ function ProofSubmit({ tiles, teams, onUpdate }) {
 
   const fetchProofs = async () => {
     try {
-      const res = await fetch('/api/proofs');
+      const res = await fetch(apiUrl('/api/proofs'));
       const data = await res.json();
       setProofs(data);
     } catch (error) {
@@ -38,7 +39,7 @@ function ProofSubmit({ tiles, teams, onUpdate }) {
     
     setLoading(true);
     try {
-      await fetch('/api/proofs', {
+      await fetch(apiUrl('/api/proofs'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

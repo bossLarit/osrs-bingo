@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BookOpen, Edit3, Save, X } from 'lucide-react';
+import { apiUrl } from '../api';
 
 function Rules() {
   const [rules, setRules] = useState('');
@@ -17,7 +18,7 @@ function Rules() {
 
   const fetchRules = async () => {
     try {
-      const res = await fetch('/api/rules');
+      const res = await fetch(apiUrl('/api/rules'));
       const data = await res.json();
       setRules(data.rules || '');
       setEditedRules(data.rules || '');
@@ -43,7 +44,7 @@ function Rules() {
     setSuccess('');
     
     try {
-      const res = await fetch('/api/rules', {
+      const res = await fetch(apiUrl('/api/rules'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rules: editedRules, admin_password: adminPassword })

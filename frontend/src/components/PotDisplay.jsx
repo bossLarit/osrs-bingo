@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Coins, Gift } from 'lucide-react';
+import { apiUrl } from '../api';
 
 function PotDisplay() {
   const [pot, setPot] = useState({ value: 0, donor: 'Anonym' });
@@ -11,7 +12,7 @@ function PotDisplay() {
 
   const fetchPot = async () => {
     try {
-      const res = await fetch('/api/pot');
+      const res = await fetch(apiUrl('/api/pot'));
       const data = await res.json();
       setPot(data);
     } catch (error) {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Clock, Play, RotateCcw } from 'lucide-react';
+import { apiUrl } from '../api';
 
 function BingoTimer({ onBingoStart }) {
   const [status, setStatus] = useState({ started: false, event_start: null, event_end: null });
@@ -41,7 +42,7 @@ function BingoTimer({ onBingoStart }) {
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch('/api/bingo/status');
+      const res = await fetch(apiUrl('/api/bingo/status'));
       const data = await res.json();
       setStatus(data);
     } catch (error) {
@@ -52,7 +53,7 @@ function BingoTimer({ onBingoStart }) {
   const startBingo = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/bingo/start', {
+      const res = await fetch(apiUrl('/api/bingo/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ admin_password: password, duration_hours: durationHours })
@@ -82,7 +83,7 @@ function BingoTimer({ onBingoStart }) {
     if (!pwd) return;
 
     try {
-      const res = await fetch('/api/bingo/reset', {
+      const res = await fetch(apiUrl('/api/bingo/reset'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ admin_password: pwd })

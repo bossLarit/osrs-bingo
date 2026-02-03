@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Shield, Check, X, Image, MessageSquare, Users, Crown, Undo2, Clock, Calendar } from 'lucide-react';
+import { apiUrl } from '../api';
 
 function AdminPanel({ teams, tiles, onUpdate }) {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -31,7 +32,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch('/api/config');
+      const res = await fetch(apiUrl('/api/config'));
       const data = await res.json();
       setConfig(data);
       setEventStart(data.event_start || '');
@@ -45,7 +46,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
     if (!confirm('Fortryd sidste godkendelse?')) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/undo', {
+      const res = await fetch(apiUrl('/api/admin/undo'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ admin_password: storedPassword })
@@ -68,7 +69,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
   const saveSchedule = async () => {
     setLoading(true);
     try {
-      await fetch('/api/config', {
+      await fetch(apiUrl('/api/config'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -88,7 +89,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
 
   const verifyPassword = async (pwd) => {
     try {
-      const res = await fetch('/api/admin/verify', {
+      const res = await fetch(apiUrl('/api/admin/verify'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: pwd })
@@ -124,7 +125,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
 
   const fetchProofs = async () => {
     try {
-      const res = await fetch('/api/proofs');
+      const res = await fetch(apiUrl('/api/proofs'));
       const data = await res.json();
       setProofs(data);
     } catch (error) {
@@ -135,7 +136,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
   const handleProof = async (proofId, status) => {
     setLoading(true);
     try {
-      await fetch(`/api/proofs/${proofId}`, {
+      await fetch(apiUrl(`/api/proofs/${proofId}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, admin_password: storedPassword })
@@ -152,7 +153,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
   const deleteProof = async (proofId) => {
     if (!confirm('Slet dette bevis?')) return;
     try {
-      await fetch(`/api/proofs/${proofId}`, { method: 'DELETE' });
+      await fetch(apiUrl(`/api/proofs/${proofId}`), { method: 'DELETE' });
       fetchProofs();
     } catch (error) {
       console.error('Error deleting proof:', error);
@@ -163,7 +164,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
     if (!selectedTeam) return;
     setLoading(true);
     try {
-      await fetch('/api/admin/assign-tile', {
+      await fetch(apiUrl('/api/admin/assign-tile'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -215,6 +216,9 @@ function AdminPanel({ teams, tiles, onUpdate }) {
               {loginError}
             </div>
           )}
+          <p className="text-xs text-osrs-border mt-2">
+            Standard adgangskode: admin123
+          </p>
         </form>
       </div>
     );

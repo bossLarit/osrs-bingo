@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { MessageCircle, Send, X } from 'lucide-react';
+import { apiUrl } from '../api';
 
 function TeamChat({ teams }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -25,7 +26,7 @@ function TeamChat({ teams }) {
   const fetchMessages = async () => {
     if (!selectedTeam) return;
     try {
-      const res = await fetch(`/api/chat/${selectedTeam.id}`);
+      const res = await fetch(apiUrl(`/api/chat/${selectedTeam.id}`));
       const data = await res.json();
       setMessages(data);
     } catch (error) {
@@ -40,7 +41,7 @@ function TeamChat({ teams }) {
     setLoading(true);
     try {
       localStorage.setItem('chatPlayerName', playerName);
-      await fetch('/api/chat', {
+      await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

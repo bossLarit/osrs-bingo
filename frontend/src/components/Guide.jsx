@@ -124,26 +124,16 @@ function Guide() {
 
             <div className="space-y-3">
               <h4 className="font-semibold text-osrs-brown">Find Dit Player ID</h4>
-              <p className="text-sm text-osrs-brown mb-2">
-                WOM bruger nu spillernavne i URL'en, men du kan finde dit numeriske ID via API'et:
-              </p>
               <ol className="list-decimal list-inside space-y-2 text-sm text-osrs-brown">
                 <li>Gå til <a href="https://wiseoldman.net" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">wiseoldman.net</a></li>
-                <li>Søg efter dit OSRS brugernavn og åbn din profil</li>
-                <li>For at finde dit ID, åbn denne URL i browseren:</li>
+                <li>Søg efter dit OSRS brugernavn</li>
+                <li>Klik på din profil</li>
+                <li>Dit <strong>Player ID</strong> er i URL'en: wiseoldman.net/players/<strong>123456</strong></li>
               </ol>
               
-              <div className="bg-gray-100 p-2 rounded font-mono text-xs break-all mt-2">
-                https://api.wiseoldman.net/v2/players/<strong>[dit-brugernavn]</strong>
-              </div>
-              
-              <p className="text-sm text-osrs-brown mt-2">
-                I JSON-svaret finder du <code className="bg-gray-200 px-1 rounded">"id": 123456</code> - dette er dit Player ID.
-              </p>
-              
-              <div className="bg-green-100 p-3 rounded border border-green-300 mt-2">
-                <p className="text-sm text-green-800">
-                  ✅ <strong>Nemmere metode:</strong> Du kan bare bruge dit spillernavn direkte - vores system understøtter både navn og ID!
+              <div className="bg-yellow-100 p-3 rounded border border-yellow-300">
+                <p className="text-sm text-yellow-800">
+                  💡 <strong>Tip:</strong> Du kan også se dit Player ID i API-linket nederst på din profil.
                 </p>
               </div>
             </div>
