@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Shield, Check, X, Image, MessageSquare, Users, Crown, Undo2, Clock, Calendar } from 'lucide-react';
 import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
+import ActivityLog from './ActivityLog';
 
 function AdminPanel({ teams, tiles, onUpdate }) {
   const dialog = useDialog();
@@ -402,6 +403,11 @@ function AdminPanel({ teams, tiles, onUpdate }) {
           </div>
         </div>
       )}
+
+      {/* Activity Log */}
+      <div className="mb-8">
+        <ActivityLog adminPassword={storedPassword} />
+      </div>
 
       {/* Assign Modal */}
       {showAssignModal && (

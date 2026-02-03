@@ -66,6 +66,57 @@ if (process.env.ADMIN_PASSWORD) {
   console.log('Admin password loaded from environment variable');
 }
 
+// ============ ACTIVITY LOG ============
+
+function logActivity(action, details, actor = 'System') {
+  if (!db.actionLog) db.actionLog = [];
+  
+  const logEntry = {
+    id: Date.now(),
+    timestamp: new Date().toISOString(),
+    action,
+    details,
+    actor
+  };
+  
+  db.actionLog.unshift(logEntry); // Add to beginning
+  
+  // Keep only last 500 entries
+  if (db.actionLog.length > 500) {
+    db.actionLog = db.actionLog.slice(0, 500);
+  }
+  
+  saveDB(db);
+  return logEntry;
+}
+
+// Get activity logs (admin only)
+app.get('/api/admin/logs', (req, res) => {
+  try {
+    const { limit = 100 } = req.query;
+    const logs = (db.actionLog || []).slice(0, parseInt(limit));
+    res.json(logs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Clear logs (admin only)
+app.delete('/api/admin/logs', (req, res) => {
+  try {
+    const { admin_password } = req.body;
+    if (admin_password !== db.config.admin_password) {
+      return res.status(403).json({ error: 'Invalid password' });
+    }
+    
+    db.actionLog = [];
+    saveDB(db);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ TEAM ROUTES ============
 
 // Get all teams
@@ -115,6 +166,7 @@ app.post('/api/teams', (req, res) => {
     };
     db.teams.push(team);
     saveDB(db);
+    logActivity('TEAM_CREATED', `Hold "${name}" oprettet`);
     res.status(201).json(team);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -177,6 +229,7 @@ app.post('/api/players', (req, res) => {
     };
     db.players.push(player);
     saveDB(db);
+    logActivity('PLAYER_ADDED', `Spiller "${username}" tilføjet til pulje`);
     res.status(201).json(player);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -231,8 +284,15 @@ app.put('/api/players/:id/team', (req, res) => {
       return res.status(404).json({ error: 'Player not found' });
     }
     
+    const team = team_id ? db.teams.find(t => t.id === team_id) : null;
+    const oldTeam = player.team_id ? db.teams.find(t => t.id === player.team_id) : null;
     player.team_id = team_id;
     saveDB(db);
+    if (team) {
+      logActivity('PLAYER_ASSIGNED', `"${player.username}" tildelt til "${team.name}"`, player.username);
+    } else if (oldTeam) {
+      logActivity('PLAYER_REMOVED', `"${player.username}" fjernet fra "${oldTeam.name}"`, player.username);
+    }
     res.json(player);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -243,8 +303,12 @@ app.put('/api/players/:id/team', (req, res) => {
 app.delete('/api/players/:id', (req, res) => {
   try {
     const playerId = parseInt(req.params.id);
+    const player = db.players.find(p => p.id === playerId);
     db.players = db.players.filter(p => p.id !== playerId);
     saveDB(db);
+    if (player) {
+      logActivity('PLAYER_DELETED', `Spiller "${player.username}" slettet`);
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -850,6 +914,15 @@ app.put('/api/proofs/:id', (req, res) => {
     }
     
     saveDB(db);
+    
+    const tile = db.tiles.find(t => t.id === proof.tile_id);
+    const team = db.teams.find(t => t.id === proof.team_id);
+    if (status === 'approved') {
+      logActivity('PROOF_APPROVED', `Bevis godkendt: "${tile?.name}" for "${team?.name}" af ${proof.player_name}`, 'Admin');
+    } else if (status === 'rejected') {
+      logActivity('PROOF_REJECTED', `Bevis afvist: "${tile?.name}" for "${team?.name}"`, 'Admin');
+    }
+    
     res.json(proof);
   } catch (error) {
     res.status(500).json({ error: error.message });
