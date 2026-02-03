@@ -4,7 +4,10 @@ import ImageUpload from './ImageUpload';
 import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
 
-function TeamManager({ teams, onUpdate }) {
+function TeamManager({ teams = [], onUpdate }) {
+  // Ensure teams is array
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  
   const dialog = useDialog();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState(null);
@@ -210,13 +213,13 @@ function TeamManager({ teams, onUpdate }) {
 
   // Random distribution
   const distributeRandomly = async () => {
-    if (allPlayers.length === 0 || teams.length === 0) {
+    if (allPlayers.length === 0 || safeTeams.length === 0) {
       await dialog.alert('Du skal have både spillere og hold oprettet', { variant: 'warning' });
       return;
     }
 
     const confirmed = await dialog.confirm(
-      `Fordel ${allPlayers.length} spillere tilfældigt på ${teams.length} hold?`,
+      `Fordel ${allPlayers.length} spillere tilfældigt på ${safeTeams.length} hold?`,
       { title: 'Tilfældig Fordeling', confirmText: 'Ja, fordel' }
     );
     if (!confirmed) return;
@@ -226,11 +229,11 @@ function TeamManager({ teams, onUpdate }) {
       const shuffled = [...allPlayers].sort(() => Math.random() - 0.5);
       
       for (let i = 0; i < shuffled.length; i++) {
-        const teamIndex = i % teams.length;
+        const teamIndex = i % safeTeams.length;
         await fetch(apiUrl(`/api/players/${shuffled[i].id}/team`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ team_id: teams[teamIndex].id })
+          body: JSON.stringify({ team_id: safeTeams[teamIndex].id })
         });
       }
       
@@ -246,13 +249,13 @@ function TeamManager({ teams, onUpdate }) {
 
   // Balanced distribution with WOM data
   const distributeBalanced = async () => {
-    if (allPlayers.length === 0 || teams.length === 0) {
+    if (allPlayers.length === 0 || safeTeams.length === 0) {
       await dialog.alert('Du skal have både spillere og hold oprettet', { variant: 'warning' });
       return;
     }
 
     const confirmed = await dialog.confirm(
-      `Henter WOM data og fordeler ${allPlayers.length} spillere balanceret på ${teams.length} hold?`,
+      `Henter WOM data og fordeler ${allPlayers.length} spillere balanceret på ${safeTeams.length} hold?`,
       { title: 'Balanceret Fordeling', confirmText: 'Ja, fordel' }
     );
     if (!confirmed) return;
@@ -274,7 +277,7 @@ function TeamManager({ teams, onUpdate }) {
       });
       
       // Snake draft distribution for balance
-      const teamAssignments = teams.map(() => []);
+      const teamAssignments = safeTeams.map(() => []);
       let direction = 1;
       let teamIndex = 0;
       
@@ -282,9 +285,9 @@ function TeamManager({ teams, onUpdate }) {
         teamAssignments[teamIndex].push(player);
         teamIndex += direction;
         
-        if (teamIndex >= teams.length) {
+        if (teamIndex >= safeTeams.length) {
           direction = -1;
-          teamIndex = teams.length - 1;
+          teamIndex = safeTeams.length - 1;
         } else if (teamIndex < 0) {
           direction = 1;
           teamIndex = 0;
@@ -292,12 +295,12 @@ function TeamManager({ teams, onUpdate }) {
       }
       
       // Assign players to teams
-      for (let i = 0; i < teams.length; i++) {
+      for (let i = 0; i < safeTeams.length; i++) {
         for (const player of teamAssignments[i]) {
           await fetch(apiUrl(`/api/players/${player.id}/team`), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ team_id: teams[i].id })
+            body: JSON.stringify({ team_id: safeTeams[i].id })
           });
         }
       }
@@ -373,7 +376,7 @@ function TeamManager({ teams, onUpdate }) {
         {allPlayers.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3">
             {allPlayers.map(player => {
-              const playerTeam = (teams || []).find(t => t.id === player.team_id);
+              const playerTeam = safeTeams.find(t => t.id === player.team_id);
               return (
                 <div 
                   key={player.id}
@@ -401,7 +404,7 @@ function TeamManager({ teams, onUpdate }) {
         )}
 
         {/* Distribution buttons */}
-        {allPlayers.length > 0 && teams.length > 0 && (
+        {allPlayers.length > 0 && safeTeams.length > 0 && (
           <div className="flex gap-2 pt-2 border-t border-osrs-border border-opacity-30">
             <button
               onClick={distributeBalanced}
@@ -426,12 +429,12 @@ function TeamManager({ teams, onUpdate }) {
       <div className="grid md:grid-cols-2 gap-6">
         {/* Teams List */}
         <div>
-          <h3 className="font-semibold text-osrs-brown mb-3">Hold ({teams.length})</h3>
+          <h3 className="font-semibold text-osrs-brown mb-3">Hold ({safeTeams.length})</h3>
           <div className="space-y-2">
-            {teams.length === 0 ? (
+            {safeTeams.length === 0 ? (
               <p className="text-osrs-border text-sm">Ingen hold oprettet endnu</p>
             ) : (
-              teams.map(team => (
+              safeTeams.map(team => (
                 <div
                   key={team.id}
                   onClick={() => selectTeam(team)}
@@ -761,11 +764,11 @@ function TeamManager({ teams, onUpdate }) {
             </div>
 
             {/* Distribution preview */}
-            {memberPool.length > 0 && teams.length > 0 && (
+            {memberPool.length > 0 && safeTeams.length > 0 && (
               <div className="mb-4 p-3 bg-osrs-gold bg-opacity-10 rounded">
                 <p className="text-sm text-osrs-brown">
-                  <strong>Fordeling:</strong> {memberPool.length} medlemmer → {teams.length} hold 
-                  = ca. {Math.ceil(memberPool.length / teams.length)} per hold
+                  <strong>Fordeling:</strong> {memberPool.length} medlemmer → {safeTeams.length} hold 
+                  = ca. {Math.ceil(memberPool.length / safeTeams.length)} per hold
                 </p>
               </div>
             )}

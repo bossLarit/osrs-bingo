@@ -1,14 +1,19 @@
 import { useState } from 'react';
 import { Trophy, ChevronDown, ChevronUp, Users } from 'lucide-react';
 
-function Scoreboard({ teams, progress, tiles }) {
+function Scoreboard({ teams = [], progress = [], tiles = [] }) {
+  // Ensure arrays
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  const safeProgress = Array.isArray(progress) ? progress : [];
+  const safeTiles = Array.isArray(tiles) ? tiles : [];
+  
   const [expandedTeam, setExpandedTeam] = useState(null);
   // Calculate scores for each team
-  const teamScores = teams.map(team => {
-    const teamProgress = progress.filter(p => p.team_id === team.id);
+  const teamScores = safeTeams.map(team => {
+    const teamProgress = safeProgress.filter(p => p.team_id === team.id);
     const completedTiles = teamProgress.filter(p => p.completed);
     const totalPoints = completedTiles.reduce((sum, p) => {
-      const tile = tiles.find(t => t.id === p.tile_id);
+      const tile = safeTiles.find(t => t.id === p.tile_id);
       return sum + (tile?.points || 1);
     }, 0);
     

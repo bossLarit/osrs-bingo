@@ -3,7 +3,12 @@ import BingoTile from './BingoTile';
 import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
 
-function BingoBoard({ tiles, teams, progress, onRefresh, selectedTeamId }) {
+function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selectedTeamId }) {
+  // Ensure props are arrays
+  const safeTiles = Array.isArray(tiles) ? tiles : [];
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  const safeProgress = Array.isArray(progress) ? progress : [];
+  
   const dialog = useDialog();
   const [hoveredTile, setHoveredTile] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
@@ -72,17 +77,17 @@ function BingoBoard({ tiles, teams, progress, onRefresh, selectedTeamId }) {
   const teamFocusTileId = getTeamFocusTile();
 
   // Calculate grid size based on number of tiles
-  const gridSize = Math.ceil(Math.sqrt(tiles.length)) || 7;
+  const gridSize = Math.ceil(Math.sqrt(safeTiles.length)) || 7;
 
   // Detect bingo lines (rows, columns, diagonals)
   const bingoLines = useMemo(() => {
     const lines = {};
     
-    teams.forEach(team => {
-      const teamProgress = progress.filter(p => p.team_id === team.id && p.completed);
+    safeTeams.forEach(team => {
+      const teamProgress = safeProgress.filter(p => p.team_id === team.id && p.completed);
       const completedPositions = new Set(
         teamProgress.map(p => {
-          const tile = tiles.find(t => t.id === p.tile_id);
+          const tile = safeTiles.find(t => t.id === p.tile_id);
           return tile?.position;
         }).filter(p => p !== undefined)
       );
@@ -131,7 +136,7 @@ function BingoBoard({ tiles, teams, progress, onRefresh, selectedTeamId }) {
     });
 
     return lines;
-  }, [teams, progress, tiles, gridSize]);
+  }, [safeTeams, safeProgress, safeTiles, gridSize]);
 
   // Check if a tile position is part of a bingo line
   const isBingoTile = (position) => {
@@ -158,11 +163,11 @@ function BingoBoard({ tiles, teams, progress, onRefresh, selectedTeamId }) {
 
   // Get progress for a specific tile
   const getTileProgress = (tileId) => {
-    return progress
+    return safeProgress
       .filter(p => p.tile_id === tileId)
       .map(p => ({
         ...p,
-        team: teams.find(t => t.id === p.team_id)
+        team: safeTeams.find(t => t.id === p.team_id)
       }))
       .sort((a, b) => b.current_value - a.current_value);
   };
@@ -180,7 +185,7 @@ function BingoBoard({ tiles, teams, progress, onRefresh, selectedTeamId }) {
     return tileProgress[0]?.team;
   };
 
-  if (tiles.length === 0) {
+  if (safeTiles.length === 0) {
     return (
       <div className="osrs-border-dashed rounded-lg p-8 text-center">
         <h2 className="text-2xl font-bold text-osrs-brown mb-4">Battle Royale Bingo Card</h2>
@@ -213,7 +218,7 @@ function BingoBoard({ tiles, teams, progress, onRefresh, selectedTeamId }) {
           margin: '0 auto'
         }}
       >
-        {tiles.map(tile => {
+        {safeTiles.map(tile => {
           const leadingTeam = getLeadingTeam(tile.id);
           const tileProgress = getTileProgress(tile.id);
           const isCompleted = tileProgress.some(p => p.completed);
@@ -246,7 +251,7 @@ function BingoBoard({ tiles, teams, progress, onRefresh, selectedTeamId }) {
         <TileTooltip 
           tile={hoveredTile}
           progress={getTileProgress(hoveredTile.id)}
-          teams={teams}
+          teams={safeTeams}
           position={tooltipPosition}
         />
       )}
@@ -254,10 +259,14 @@ function BingoBoard({ tiles, teams, progress, onRefresh, selectedTeamId }) {
   );
 }
 
-function TileTooltip({ tile, progress, teams, position }) {
+function TileTooltip({ tile, progress = [], teams = [], position }) {
+  // Ensure arrays
+  const safeProgress = Array.isArray(progress) ? progress : [];
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  
   // Combine all teams with their progress (show 0 for teams without progress)
-  const allTeamsProgress = teams.map(team => {
-    const teamProgress = progress.find(p => p.team_id === team.id);
+  const allTeamsProgress = safeTeams.map(team => {
+    const teamProgress = safeProgress.find(p => p.team_id === team.id);
     return {
       team,
       current_value: teamProgress?.current_value || 0,
@@ -301,7 +310,7 @@ function TileTooltip({ tile, progress, teams, position }) {
         <h4 className="text-sm font-semibold text-gray-300 mb-2">
           Alle Hold Progress:
         </h4>
-        {teams.length === 0 ? (
+        {safeTeams.length === 0 ? (
           <p className="text-gray-500 text-sm">Ingen hold oprettet endnu</p>
         ) : (
           <div className="space-y-2 max-h-48 overflow-y-auto">
