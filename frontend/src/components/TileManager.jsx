@@ -598,7 +598,7 @@ function TileManager({ tiles, teams, onUpdate }) {
 
               <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
-                  <label className="block text-osrs-brown mb-1 text-sm" title="0 = konkurrence (højeste vinder)">Mål Værdi</label>
+                  <label className="block text-osrs-brown mb-1 text-sm" title="0 = Den der har mest XP vinder">Mål Værdi</label>
                   <input
                     type="number"
                     value={formData.target_value}
