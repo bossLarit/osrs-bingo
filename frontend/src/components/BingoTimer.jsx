@@ -62,7 +62,8 @@ function BingoTimer({ onBingoStart }) {
       });
       const data = await res.json();
       if (data.success) {
-        await dialog.success(`Bingo startet! Baseline gemt for ${data.players.filter(p => p.success).length} spillere`);
+        const successCount = (data.players || []).filter(p => p.success).length;
+        await dialog.success(`Bingo startet!${successCount > 0 ? ` Baseline gemt for ${successCount} spillere` : ''}`);
         setShowStartModal(false);
         setPassword('');
         fetchStatus();
