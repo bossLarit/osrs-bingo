@@ -8,6 +8,7 @@ node_modules/
 
 # Database
 backend/data.json
+backend/supabase-schema.sql
 
 # Build output
 dist/
