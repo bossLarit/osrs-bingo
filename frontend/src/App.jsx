@@ -223,7 +223,8 @@ function App() {
             🎲 OSRS Bingo
           </h1>
           <p className="text-osrs-border text-lg mb-4">Battle Royale Bingo Card</p>
-          <div className="max-w-sm mx-auto">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-2xl mx-auto">
+            <BingoTimer onBingoStart={fetchData} />
             <PotDisplay />
           </div>
         </header>
