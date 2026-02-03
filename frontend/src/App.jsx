@@ -379,7 +379,7 @@ function App() {
       />
 
       {/* Welcome Modal */}
-      {showWelcome && !loading && teams.length > 0 && (
+      {showWelcome && !loading && (
         <WelcomeModal
           teams={teams}
           onPlayerSelect={handleWelcomeSelect}

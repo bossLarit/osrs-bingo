@@ -118,7 +118,7 @@ function WelcomeModal({ teams, onPlayerSelect, onClose }) {
   });
 
   const handleSelectPlayer = (player) => {
-    const team = teams.find(t => t.id === player.team_id);
+    const team = (teams || []).find(t => t.id === player.team_id);
     onPlayerSelect(player, team?.id);
     onClose();
   };
@@ -352,7 +352,7 @@ function WelcomeModal({ teams, onPlayerSelect, onClose }) {
                 </div>
               ) : (
                 <div className="max-h-64 overflow-y-auto space-y-2">
-                  {teams.map(team => {
+                  {(teams || []).map(team => {
                     const teamPlayers = playersByTeam[team.id] || [];
                     if (teamPlayers.length === 0) return null;
                     
@@ -411,7 +411,7 @@ function WelcomeModal({ teams, onPlayerSelect, onClose }) {
                   Vælg dit hold
                 </label>
                 <div className="space-y-2">
-                  {teams.map(team => (
+                  {(teams || []).map(team => (
                     <label
                       key={team.id}
                       className={`flex items-center gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors ${
