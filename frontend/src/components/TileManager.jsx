@@ -168,7 +168,11 @@ const ALL_PETS = [
 
 const SKILL_METRICS = ALL_SKILLS.map(s => s.metric);
 
-function TileManager({ tiles, teams, onUpdate }) {
+function TileManager({ tiles = [], teams = [], onUpdate }) {
+  // Ensure props are arrays
+  const safeTiles = Array.isArray(tiles) ? tiles : [];
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingTile, setEditingTile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -185,7 +189,7 @@ function TileManager({ tiles, teams, onUpdate }) {
     target_value: 1,
     points: 1,
     image_url: '',
-    position: tiles.length
+    position: safeTiles.length
   });
 
   const resetForm = () => {
@@ -197,7 +201,7 @@ function TileManager({ tiles, teams, onUpdate }) {
       target_value: 1,
       points: 1,
       image_url: '',
-      position: tiles.length
+      position: safeTiles.length
     });
     setEditingTile(null);
   };
@@ -460,7 +464,7 @@ function TileManager({ tiles, teams, onUpdate }) {
             <Download size={18} />
             Indlæs Board
           </button>
-          {tiles.length > 0 && (
+          {safeTiles.length > 0 && (
             <button
               onClick={deleteAllTiles}
               disabled={loading}
@@ -482,7 +486,7 @@ function TileManager({ tiles, teams, onUpdate }) {
 
       {/* Tiles Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        {tiles.map(tile => (
+        {safeTiles.map(tile => (
           <div 
             key={tile.id}
             className="bg-white bg-opacity-50 rounded-lg p-3 relative group"
@@ -529,7 +533,7 @@ function TileManager({ tiles, teams, onUpdate }) {
         ))}
       </div>
 
-      {tiles.length === 0 && (
+      {safeTiles.length === 0 && (
         <p className="text-center text-osrs-border py-8">
           Ingen bingo-felter oprettet endnu. Klik på "Tilføj Felt" eller "Generer Eksempler" for at starte.
         </p>
@@ -665,7 +669,7 @@ function TileManager({ tiles, teams, onUpdate }) {
       {showProgressModal && (
         <ProgressModal
           tile={showProgressModal}
-          teams={teams}
+          teams={safeTeams}
           onClose={() => setShowProgressModal(null)}
           onUpdate={updateProgress}
         />
