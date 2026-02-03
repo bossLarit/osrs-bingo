@@ -30,13 +30,21 @@ async function logActivity(action, details, actor = 'System') {
 }
 
 async function getConfig() {
-  const { data } = await supabase.from('config').select('*').single();
-  return data || { 
-    admin_password: ADMIN_PASSWORD, 
-    site_pin: SITE_PIN,
-    name: 'OSRS Bingo',
-    grid_size: 7
-  };
+  const { data, error } = await supabase.from('config').select('*').limit(1);
+  
+  if (error || !data || data.length === 0) {
+    // Create default config if none exists
+    const defaultConfig = { 
+      admin_password: ADMIN_PASSWORD, 
+      site_pin: SITE_PIN,
+      name: 'OSRS Bingo',
+      grid_size: 7
+    };
+    await supabase.from('config').insert(defaultConfig);
+    return defaultConfig;
+  }
+  
+  return data[0];
 }
 
 // ============ TEAM ROUTES ============
