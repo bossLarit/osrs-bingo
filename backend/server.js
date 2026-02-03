@@ -123,10 +123,14 @@ app.delete('/api/admin/logs', (req, res) => {
 // Get all teams
 app.get('/api/teams', (req, res) => {
   try {
-    const teams = db.teams.map(t => ({
-      ...t,
-      player_count: db.players.filter(p => p.team_id === t.id).length
-    }));
+    const teams = db.teams.map(t => {
+      const teamPlayers = db.players.filter(p => p.team_id === t.id);
+      return {
+        ...t,
+        player_count: teamPlayers.length,
+        members: teamPlayers.map(p => p.username)
+      };
+    });
     res.json(teams);
   } catch (error) {
     res.status(500).json({ error: error.message });
