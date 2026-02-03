@@ -599,24 +599,40 @@ app.post('/api/sync', async (req, res) => {
     
     for (const player of db.players) {
       try {
+        // First, trigger an UPDATE on WOM to get fresh data from hiscores
+        const updateResponse = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        // Wait a bit for WOM to process the update
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Then fetch the updated player data
         const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
         if (response.ok) {
           const data = await response.json();
           if (data.id) {
             player.wom_id = data.id;
           }
-          results.push({ username: player.username, success: true, data });
+          // Store the latest snapshot data
+          if (data.latestSnapshot?.data) {
+            player.current_stats = data.latestSnapshot.data;
+            player.wom_data = data;
+          }
+          results.push({ username: player.username, success: true, updated: updateResponse.ok, data });
         } else {
-          results.push({ username: player.username, success: false, error: 'Player not found' });
+          results.push({ username: player.username, success: false, error: 'Player not found on WOM' });
         }
       } catch (e) {
         results.push({ username: player.username, success: false, error: e.message });
       }
-      // Rate limiting - wait 100ms between requests
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Rate limiting - wait between requests to avoid rate limits
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
     
     saveDB(db);
+    logActivity('WOM_SYNC', `Synkroniseret ${results.filter(r => r.success).length}/${results.length} spillere fra WOM`);
     res.json(results);
   } catch (error) {
     res.status(500).json({ error: error.message });
