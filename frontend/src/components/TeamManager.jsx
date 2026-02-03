@@ -210,20 +210,20 @@ function TeamManager({ teams, onUpdate }) {
 
   // Random distribution
   const distributeRandomly = async () => {
-    if (unassignedPlayers.length === 0 || teams.length === 0) {
-      await dialog.alert('Du skal have både spillere i puljen og hold oprettet', { variant: 'warning' });
+    if (allPlayers.length === 0 || teams.length === 0) {
+      await dialog.alert('Du skal have både spillere og hold oprettet', { variant: 'warning' });
       return;
     }
 
     const confirmed = await dialog.confirm(
-      `Fordel ${unassignedPlayers.length} spillere tilfældigt på ${teams.length} hold?`,
+      `Fordel ${allPlayers.length} spillere tilfældigt på ${teams.length} hold?`,
       { title: 'Tilfældig Fordeling', confirmText: 'Ja, fordel' }
     );
     if (!confirmed) return;
 
     setDistributing(true);
     try {
-      const shuffled = [...unassignedPlayers].sort(() => Math.random() - 0.5);
+      const shuffled = [...allPlayers].sort(() => Math.random() - 0.5);
       
       for (let i = 0; i < shuffled.length; i++) {
         const teamIndex = i % teams.length;
@@ -246,13 +246,13 @@ function TeamManager({ teams, onUpdate }) {
 
   // Balanced distribution with WOM data
   const distributeBalanced = async () => {
-    if (unassignedPlayers.length === 0 || teams.length === 0) {
-      await dialog.alert('Du skal have både spillere i puljen og hold oprettet', { variant: 'warning' });
+    if (allPlayers.length === 0 || teams.length === 0) {
+      await dialog.alert('Du skal have både spillere og hold oprettet', { variant: 'warning' });
       return;
     }
 
     const confirmed = await dialog.confirm(
-      `Henter WOM data og fordeler ${unassignedPlayers.length} spillere balanceret på ${teams.length} hold?`,
+      `Henter WOM data og fordeler ${allPlayers.length} spillere balanceret på ${teams.length} hold?`,
       { title: 'Balanceret Fordeling', confirmText: 'Ja, fordel' }
     );
     if (!confirmed) return;
@@ -265,10 +265,9 @@ function TeamManager({ teams, onUpdate }) {
       // Get updated player data with stats
       const res = await fetch(apiUrl('/api/players'));
       const players = await res.json();
-      const unassigned = players.filter(p => !p.team_id);
       
       // Sort by total level/experience (you could expand this)
-      const sorted = [...unassigned].sort((a, b) => {
+      const sorted = [...players].sort((a, b) => {
         const aTotal = a.wom_data?.latestSnapshot?.data?.skills?.overall?.level || 0;
         const bTotal = b.wom_data?.latestSnapshot?.data?.skills?.overall?.level || 0;
         return bTotal - aTotal;
@@ -335,12 +334,12 @@ function TeamManager({ teams, onUpdate }) {
     <div className="osrs-border-dashed rounded-lg p-6">
       <h2 className="text-2xl font-bold text-osrs-brown mb-6">Hold Administration</h2>
 
-      {/* Player Pool Section */}
+      {/* All Players Section */}
       <div className="mb-6 p-4 bg-white bg-opacity-30 rounded-lg">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-osrs-brown flex items-center gap-2">
             <Users size={18} />
-            Spiller Pulje ({unassignedPlayers.length} ikke tildelt)
+            Alle Spillere ({allPlayers.length})
           </h3>
           <button
             onClick={() => setShowCreateModal(true)}
@@ -370,29 +369,39 @@ function TeamManager({ teams, onUpdate }) {
           </button>
         </form>
 
-        {/* Unassigned players */}
-        {unassignedPlayers.length > 0 && (
+        {/* All players list */}
+        {allPlayers.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3">
-            {unassignedPlayers.map(player => (
-              <div 
-                key={player.id}
-                className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded text-sm"
-              >
-                <span className="text-osrs-brown">{player.username}</span>
-                <button
-                  onClick={() => deletePlayer(player.id)}
-                  className="text-red-500 hover:text-red-700 p-0.5"
-                  title="Slet spiller"
+            {allPlayers.map(player => {
+              const playerTeam = (teams || []).find(t => t.id === player.team_id);
+              return (
+                <div 
+                  key={player.id}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-sm"
+                  style={{ 
+                    backgroundColor: playerTeam ? `${playerTeam.color}30` : '#f3f4f6',
+                    borderLeft: playerTeam ? `3px solid ${playerTeam.color}` : '3px solid #9ca3af'
+                  }}
                 >
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
+                  <span className="text-osrs-brown">{player.username}</span>
+                  {playerTeam && (
+                    <span className="text-xs text-gray-500">({playerTeam.name})</span>
+                  )}
+                  <button
+                    onClick={() => deletePlayer(player.id)}
+                    className="text-red-500 hover:text-red-700 p-0.5"
+                    title="Slet spiller"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 
         {/* Distribution buttons */}
-        {unassignedPlayers.length > 0 && teams.length > 0 && (
+        {allPlayers.length > 0 && teams.length > 0 && (
           <div className="flex gap-2 pt-2 border-t border-osrs-border border-opacity-30">
             <button
               onClick={distributeBalanced}
