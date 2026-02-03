@@ -928,13 +928,19 @@ app.post('/api/bingo/start', async (req, res) => {
     
     // Save baseline stats for all players
     const { data: players } = await supabase.from('players').select('*');
+    const playerResults = [];
     for (const player of (players || [])) {
-      await supabase.from('players')
-        .update({ 
-          baseline_stats: player.current_stats,
-          baseline_timestamp: now.toISOString()
-        })
-        .eq('id', player.id);
+      try {
+        await supabase.from('players')
+          .update({ 
+            baseline_stats: player.current_stats,
+            baseline_timestamp: now.toISOString()
+          })
+          .eq('id', player.id);
+        playerResults.push({ username: player.username, success: true });
+      } catch (e) {
+        playerResults.push({ username: player.username, success: false });
+      }
     }
     
     await logActivity('BINGO_STARTED', `Bingo event startet (${duration_hours} timer)`);
@@ -942,7 +948,8 @@ app.post('/api/bingo/start', async (req, res) => {
     res.json({ 
       success: true, 
       event_start: now.toISOString(),
-      event_end: endTime.toISOString()
+      event_end: endTime.toISOString(),
+      players: playerResults
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
