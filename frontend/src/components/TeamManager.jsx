@@ -82,7 +82,7 @@ function TeamManager({ teams, onUpdate }) {
     if (!confirmed) return;
     
     try {
-      await fetch(`/api/teams/${teamId}`, { method: 'DELETE' });
+      await fetch(apiUrl(`/api/teams/${teamId}`), { method: 'DELETE' });
       setSelectedTeam(null);
       onUpdate();
     } catch (error) {
