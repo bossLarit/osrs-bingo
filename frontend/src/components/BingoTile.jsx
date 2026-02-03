@@ -1,5 +1,8 @@
+import { getTileIcon } from '../utils/tileIcons';
+
 function BingoTile({ tile, leadingTeam, progress, isCompleted, bingoColor, voteCount, onVote, onHover, onLeave }) {
   const highestProgress = progress[0];
+  const tileIcon = getTileIcon(tile);
   
   // Determine background style based on leading team
   const tileStyle = leadingTeam ? {
@@ -34,25 +37,28 @@ function BingoTile({ tile, leadingTeam, progress, isCompleted, bingoColor, voteC
     >
       {/* Tile Image */}
       <div className="w-full h-full flex items-center justify-center p-2">
-        {tile.image_url ? (
-          <img 
-            src={tile.image_url} 
-            alt={tile.name}
-            className="max-w-full max-h-full object-contain"
-            onError={(e) => {
-              e.target.style.display = 'none';
-              e.target.nextSibling.style.display = 'flex';
-            }}
-          />
-        ) : null}
-        <div 
-          className={`text-center ${tile.image_url ? 'hidden' : 'flex'} flex-col items-center justify-center h-full`}
-        >
-          <span className="text-3xl mb-1">🎯</span>
-          <span className="text-xs text-osrs-brown font-semibold line-clamp-2 px-1">
-            {tile.name}
-          </span>
-        </div>
+        {tileIcon ? (
+          <div className="flex flex-col items-center justify-center h-full">
+            <img 
+              src={tileIcon} 
+              alt={tile.name}
+              className="max-w-[60%] max-h-[60%] object-contain mb-1"
+              onError={(e) => {
+                e.target.style.display = 'none';
+              }}
+            />
+            <span className="text-xs text-osrs-brown font-semibold line-clamp-2 px-1 text-center">
+              {tile.name}
+            </span>
+          </div>
+        ) : (
+          <div className="text-center flex flex-col items-center justify-center h-full">
+            <span className="text-3xl mb-1">🎯</span>
+            <span className="text-xs text-osrs-brown font-semibold line-clamp-2 px-1">
+              {tile.name}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Points badge */}
