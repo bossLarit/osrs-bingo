@@ -25,7 +25,7 @@ const defaultData = {
     name: 'OSRS Bingo', 
     grid_size: 7, 
     active: true, 
-    admin_password: 'admin123',
+    admin_password: process.env.ADMIN_PASSWORD || 'changeme',
     event_start: null,
     event_end: null,
     sounds_enabled: true,
