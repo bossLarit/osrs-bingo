@@ -155,6 +155,34 @@ app.delete('/api/teams/:id', (req, res) => {
 
 // ============ PLAYER ROUTES ============
 
+// Add player to pool (no team)
+app.post('/api/players', (req, res) => {
+  try {
+    const { username } = req.body;
+    
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+    
+    if (db.players.some(p => p.username.toLowerCase() === username.toLowerCase())) {
+      return res.status(400).json({ error: 'Player already exists' });
+    }
+
+    const player = {
+      id: db.nextIds.player++,
+      username,
+      team_id: null,
+      wom_id: null,
+      created_at: new Date().toISOString()
+    };
+    db.players.push(player);
+    saveDB(db);
+    res.status(201).json(player);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Add player to team
 app.post('/api/teams/:teamId/players', (req, res) => {
   try {
@@ -165,8 +193,16 @@ app.post('/api/teams/:teamId/players', (req, res) => {
       return res.status(400).json({ error: 'Username is required' });
     }
     
-    if (db.players.some(p => p.username === username && p.team_id === teamId)) {
+    if (db.players.some(p => p.username.toLowerCase() === username.toLowerCase() && p.team_id === teamId)) {
       return res.status(400).json({ error: 'Player already in this team' });
+    }
+
+    // Check if player exists in pool
+    const existingPlayer = db.players.find(p => p.username.toLowerCase() === username.toLowerCase());
+    if (existingPlayer) {
+      existingPlayer.team_id = teamId;
+      saveDB(db);
+      return res.json(existingPlayer);
     }
 
     const player = {
@@ -179,6 +215,25 @@ app.post('/api/teams/:teamId/players', (req, res) => {
     db.players.push(player);
     saveDB(db);
     res.status(201).json(player);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Assign player to team
+app.put('/api/players/:id/team', (req, res) => {
+  try {
+    const playerId = parseInt(req.params.id);
+    const { team_id } = req.body;
+    
+    const player = db.players.find(p => p.id === playerId);
+    if (!player) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+    
+    player.team_id = team_id;
+    saveDB(db);
+    res.json(player);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

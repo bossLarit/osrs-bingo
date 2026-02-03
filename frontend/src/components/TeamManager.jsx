@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Plus, Trash2, UserPlus, X, Shuffle, Users, Scale } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Trash2, UserPlus, X, Shuffle, Users, Scale, RefreshCw, Crown, ChevronRight } from 'lucide-react';
 import ImageUpload from './ImageUpload';
 import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
@@ -7,31 +7,46 @@ import { useDialog } from './Dialog';
 function TeamManager({ teams, onUpdate }) {
   const dialog = useDialog();
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showRandomModal, setShowRandomModal] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamColor, setNewTeamColor] = useState('#3b82f6');
-  const [newTeamLogo, setNewTeamLogo] = useState('');
+  const [newTeamCaptain, setNewTeamCaptain] = useState('');
   const [newPlayerName, setNewPlayerName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [distributing, setDistributing] = useState(false);
   
-  // Random assignment state
-  const [memberPool, setMemberPool] = useState([]);
-  const [poolInput, setPoolInput] = useState('');
+  // All players from database
+  const [allPlayers, setAllPlayers] = useState([]);
   
   // Pending logo state for explicit save
   const [pendingLogo, setPendingLogo] = useState(null);
-  
-  // Balanced team distribution state
-  const [showBalancedModal, setShowBalancedModal] = useState(false);
-  const [balancedPlayers, setBalancedPlayers] = useState([]);
-  const [balancedInput, setBalancedInput] = useState('');
-  const [balanceBy, setBalanceBy] = useState('all');
 
   const predefinedColors = [
     '#ef4444', '#f97316', '#eab308', '#22c55e', 
     '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'
   ];
+
+  useEffect(() => {
+    fetchPlayers();
+  }, []);
+
+  const fetchPlayers = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/players'));
+      const data = await res.json();
+      setAllPlayers(data);
+    } catch (error) {
+      console.error('Error fetching players:', error);
+    }
+  };
+
+  // Get unassigned players
+  const unassignedPlayers = allPlayers.filter(p => !p.team_id);
+  
+  // Get players for selected team
+  const teamPlayers = selectedTeam 
+    ? allPlayers.filter(p => p.team_id === selectedTeam.id)
+    : [];
 
   const createTeam = async (e) => {
     e.preventDefault();
@@ -142,208 +157,259 @@ function TeamManager({ teams, onUpdate }) {
     }
   };
 
-  // Random assignment functions
-  const addToPool = () => {
-    if (!poolInput.trim()) return;
-    const names = poolInput.split(/[,\n]/).map(n => n.trim()).filter(n => n);
-    setMemberPool([...memberPool, ...names]);
-    setPoolInput('');
-  };
-
-  const removeFromPool = (index) => {
-    setMemberPool(memberPool.filter((_, i) => i !== index));
-  };
-
-  const shuffleArray = (array) => {
-    const shuffled = [...array];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
-  };
-
-  const distributeRandomly = async () => {
-    if (memberPool.length === 0 || teams.length === 0) {
-      await dialog.alert('Du skal have både medlemmer i puljen og hold oprettet');
-      return;
-    }
-
-    const confirmed = await dialog.confirm(`Fordel ${memberPool.length} medlemmer tilfældigt på ${teams.length} hold?`, {
-      title: 'Tilfældig fordeling',
-      confirmText: 'Ja, fordel'
-    });
-    if (!confirmed) return;
-
+  // Add player to pool (no team)
+  const addPlayerToPool = async (e) => {
+    e.preventDefault();
+    if (!newPlayerName.trim()) return;
+    
     setLoading(true);
     try {
-      const shuffledMembers = shuffleArray(memberPool);
+      const res = await fetch(apiUrl('/api/players'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: newPlayerName.trim() })
+      });
       
-      for (let i = 0; i < shuffledMembers.length; i++) {
-        const teamIndex = i % teams.length;
-        const team = teams[teamIndex];
-        
-        await fetch(`/api/teams/${team.id}/players`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: shuffledMembers[i] })
-        });
+      if (!res.ok) {
+        const data = await res.json();
+        await dialog.error(data.error || 'Kunne ikke tilføje spiller');
+        return;
       }
       
-      setMemberPool([]);
-      setShowRandomModal(false);
+      setNewPlayerName('');
+      fetchPlayers();
       onUpdate();
-      await dialog.success('Medlemmer fordelt tilfældigt!');
     } catch (error) {
-      console.error('Error distributing members:', error);
+      console.error('Error adding player:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Balanced team distribution functions
-  const parseBalancedInput = () => {
-    if (!balancedInput.trim()) return;
-    
-    // Parse tab-separated or comma-separated data
-    // Format: Name, Combat, Total, EHB (or tab-separated)
-    const lines = balancedInput.trim().split('\n');
-    const players = [];
-    
-    for (const line of lines) {
-      // Try tab-separated first, then comma
-      let parts = line.split('\t');
-      if (parts.length < 2) {
-        parts = line.split(',').map(p => p.trim());
-      }
-      
-      if (parts.length >= 2) {
-        const name = parts[0].trim();
-        const combat = parseInt(parts[1]) || 0;
-        const total = parseInt(parts[2]) || 0;
-        const ehb = parseFloat(parts[3]) || 0;
-        
-        if (name) {
-          players.push({ name, combat, total, ehb });
-        }
-      }
-    }
-    
-    setBalancedPlayers([...balancedPlayers, ...players]);
-    setBalancedInput('');
-  };
-
-  const removeBalancedPlayer = (index) => {
-    setBalancedPlayers(balancedPlayers.filter((_, i) => i !== index));
-  };
-
-  const getBalanceValue = (player) => {
-    switch (balanceBy) {
-      case 'all': 
-        // Normalize and combine all stats (EHB weighted more as it's more meaningful)
-        return (player.ehb * 10) + (player.total / 100) + (player.combat / 10);
-      case 'ehb': return player.ehb;
-      case 'total': return player.total;
-      case 'combat': return player.combat;
-      default: return (player.ehb * 10) + (player.total / 100) + (player.combat / 10);
+  // Assign player to team
+  const assignPlayerToTeam = async (playerId, teamId) => {
+    try {
+      await fetch(apiUrl(`/api/players/${playerId}/team`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ team_id: teamId })
+      });
+      fetchPlayers();
+      onUpdate();
+    } catch (error) {
+      console.error('Error assigning player:', error);
     }
   };
 
-  const getBalanceLabel = () => {
-    switch (balanceBy) {
-      case 'all': return 'Score';
-      case 'ehb': return 'EHB';
-      case 'total': return 'Total';
-      case 'combat': return 'Combat';
-      default: return 'Score';
-    }
+  // Remove player from team (back to pool)
+  const removePlayerFromTeam = async (playerId) => {
+    await assignPlayerToTeam(playerId, null);
   };
 
-  const distributeBalanced = async () => {
-    if (balancedPlayers.length === 0 || teams.length === 0) {
-      await dialog.alert('Du skal have både spillere og hold');
+  // Random distribution
+  const distributeRandomly = async () => {
+    if (unassignedPlayers.length === 0 || teams.length === 0) {
+      await dialog.alert('Du skal have både spillere i puljen og hold oprettet', { variant: 'warning' });
       return;
     }
 
-    const balanceConfirmed = await dialog.confirm(`Fordel ${balancedPlayers.length} spillere balanceret på ${teams.length} hold baseret på ${getBalanceLabel()}?`, {
-      title: 'Balanceret fordeling',
-      confirmText: 'Ja, fordel'
-    });
-    if (!balanceConfirmed) return;
+    const confirmed = await dialog.confirm(
+      `Fordel ${unassignedPlayers.length} spillere tilfældigt på ${teams.length} hold?`,
+      { title: 'Tilfældig Fordeling', confirmText: 'Ja, fordel' }
+    );
+    if (!confirmed) return;
 
-    setLoading(true);
+    setDistributing(true);
     try {
-      // Sort players by balance value (highest first)
-      const sortedPlayers = [...balancedPlayers].sort((a, b) => getBalanceValue(b) - getBalanceValue(a));
+      const shuffled = [...unassignedPlayers].sort(() => Math.random() - 0.5);
       
-      // Initialize team scores
-      const teamScores = teams.map(t => ({ team: t, score: 0, players: [] }));
-      
-      // Snake draft - assign each player to the team with lowest current score
-      for (const player of sortedPlayers) {
-        // Find team with lowest score
-        teamScores.sort((a, b) => a.score - b.score);
-        const targetTeam = teamScores[0];
-        
-        targetTeam.players.push(player);
-        targetTeam.score += getBalanceValue(player);
+      for (let i = 0; i < shuffled.length; i++) {
+        const teamIndex = i % teams.length;
+        await fetch(apiUrl(`/api/players/${shuffled[i].id}/team`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ team_id: teams[teamIndex].id })
+        });
       }
       
-      // Add players to teams via API
-      for (const ts of teamScores) {
-        for (const player of ts.players) {
-          await fetch(`/api/teams/${ts.team.id}/players`, {
-            method: 'POST',
+      await dialog.success('Spillere fordelt tilfældigt!');
+      fetchPlayers();
+      onUpdate();
+    } catch (error) {
+      console.error('Error distributing:', error);
+    } finally {
+      setDistributing(false);
+    }
+  };
+
+  // Balanced distribution with WOM data
+  const distributeBalanced = async () => {
+    if (unassignedPlayers.length === 0 || teams.length === 0) {
+      await dialog.alert('Du skal have både spillere i puljen og hold oprettet', { variant: 'warning' });
+      return;
+    }
+
+    const confirmed = await dialog.confirm(
+      `Henter WOM data og fordeler ${unassignedPlayers.length} spillere balanceret på ${teams.length} hold?`,
+      { title: 'Balanceret Fordeling', confirmText: 'Ja, fordel' }
+    );
+    if (!confirmed) return;
+
+    setDistributing(true);
+    try {
+      // Sync player data from WOM first
+      await fetch(apiUrl('/api/sync'), { method: 'POST' });
+      
+      // Get updated player data with stats
+      const res = await fetch(apiUrl('/api/players'));
+      const players = await res.json();
+      const unassigned = players.filter(p => !p.team_id);
+      
+      // Sort by total level/experience (you could expand this)
+      const sorted = [...unassigned].sort((a, b) => {
+        const aTotal = a.wom_data?.latestSnapshot?.data?.skills?.overall?.level || 0;
+        const bTotal = b.wom_data?.latestSnapshot?.data?.skills?.overall?.level || 0;
+        return bTotal - aTotal;
+      });
+      
+      // Snake draft distribution for balance
+      const teamAssignments = teams.map(() => []);
+      let direction = 1;
+      let teamIndex = 0;
+      
+      for (const player of sorted) {
+        teamAssignments[teamIndex].push(player);
+        teamIndex += direction;
+        
+        if (teamIndex >= teams.length) {
+          direction = -1;
+          teamIndex = teams.length - 1;
+        } else if (teamIndex < 0) {
+          direction = 1;
+          teamIndex = 0;
+        }
+      }
+      
+      // Assign players to teams
+      for (let i = 0; i < teams.length; i++) {
+        for (const player of teamAssignments[i]) {
+          await fetch(apiUrl(`/api/players/${player.id}/team`), {
+            method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: player.name })
+            body: JSON.stringify({ team_id: teams[i].id })
           });
         }
       }
       
-      // Show results
-      const results = teamScores.map(ts => 
-        `${ts.team.name}: ${ts.players.length} spillere (${balanceBy}: ${ts.score.toFixed(1)})`
-      ).join('\n');
-      
-      await dialog.success(`Spillere fordelt balanceret!\n\n${results}`);
-      
-      setBalancedPlayers([]);
-      setShowBalancedModal(false);
+      await dialog.success('Spillere fordelt balanceret!');
+      fetchPlayers();
       onUpdate();
     } catch (error) {
-      console.error('Error distributing balanced:', error);
+      console.error('Error distributing:', error);
     } finally {
-      setLoading(false);
+      setDistributing(false);
+    }
+  };
+
+  // Delete player completely
+  const deletePlayer = async (playerId) => {
+    const confirmed = await dialog.confirm('Slet denne spiller helt?', {
+      title: 'Slet spiller',
+      confirmText: 'Ja, slet',
+      variant: 'error'
+    });
+    if (!confirmed) return;
+    
+    try {
+      await fetch(apiUrl(`/api/players/${playerId}`), { method: 'DELETE' });
+      fetchPlayers();
+      onUpdate();
+    } catch (error) {
+      console.error('Error deleting player:', error);
     }
   };
 
   return (
     <div className="osrs-border-dashed rounded-lg p-6">
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
-        <h2 className="text-2xl font-bold text-osrs-brown">Hold Administration</h2>
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={() => setShowBalancedModal(true)}
-            className="btn-osrs flex items-center gap-2 rounded"
-          >
-            <Scale size={18} />
-            Balanceret Fordeling
-          </button>
-          <button
-            onClick={() => setShowRandomModal(true)}
-            className="btn-osrs flex items-center gap-2 rounded"
-          >
-            <Shuffle size={18} />
-            Tilfældig Fordeling
-          </button>
+      <h2 className="text-2xl font-bold text-osrs-brown mb-6">Hold Administration</h2>
+
+      {/* Player Pool Section */}
+      <div className="mb-6 p-4 bg-white bg-opacity-30 rounded-lg">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-osrs-brown flex items-center gap-2">
+            <Users size={18} />
+            Spiller Pulje ({unassignedPlayers.length} ikke tildelt)
+          </h3>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="btn-osrs flex items-center gap-2 rounded"
+            className="btn-osrs flex items-center gap-2 rounded text-sm"
           >
-            <Plus size={18} />
+            <Plus size={16} />
             Opret Hold
           </button>
         </div>
+        
+        {/* Add player form */}
+        <form onSubmit={addPlayerToPool} className="flex gap-2 mb-3">
+          <input
+            type="text"
+            value={newPlayerName}
+            onChange={(e) => setNewPlayerName(e.target.value)}
+            placeholder="Tilføj spiller (OSRS navn)..."
+            className="input-osrs flex-1 rounded"
+          />
+          <button
+            type="submit"
+            disabled={loading || !newPlayerName.trim()}
+            className="btn-osrs flex items-center gap-2 rounded"
+          >
+            <UserPlus size={18} />
+            Tilføj
+          </button>
+        </form>
+
+        {/* Unassigned players */}
+        {unassignedPlayers.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-3">
+            {unassignedPlayers.map(player => (
+              <div 
+                key={player.id}
+                className="flex items-center gap-1 bg-gray-100 px-2 py-1 rounded text-sm"
+              >
+                <span className="text-osrs-brown">{player.username}</span>
+                <button
+                  onClick={() => deletePlayer(player.id)}
+                  className="text-red-500 hover:text-red-700 p-0.5"
+                  title="Slet spiller"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Distribution buttons */}
+        {unassignedPlayers.length > 0 && teams.length > 0 && (
+          <div className="flex gap-2 pt-2 border-t border-osrs-border border-opacity-30">
+            <button
+              onClick={distributeBalanced}
+              disabled={distributing}
+              className="btn-osrs flex items-center gap-2 rounded flex-1"
+            >
+              <Scale size={18} />
+              {distributing ? 'Fordeler...' : 'Balanceret Fordeling'}
+            </button>
+            <button
+              onClick={distributeRandomly}
+              disabled={distributing}
+              className="btn-osrs flex items-center gap-2 rounded flex-1"
+            >
+              <Shuffle size={18} />
+              {distributing ? 'Fordeler...' : 'Tilfældig Fordeling'}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
@@ -425,24 +491,24 @@ function TeamManager({ teams, onUpdate }) {
                 </button>
               </div>
 
-              {/* Add Player Form */}
-              <form onSubmit={addPlayer} className="flex gap-2 mb-4">
-                <input
-                  type="text"
-                  value={newPlayerName}
-                  onChange={(e) => setNewPlayerName(e.target.value)}
-                  placeholder="OSRS brugernavn"
-                  className="input-osrs flex-1 rounded"
-                />
-                <button
-                  type="submit"
-                  disabled={loading || !newPlayerName.trim()}
-                  className="btn-osrs flex items-center gap-2 rounded"
-                >
-                  <UserPlus size={18} />
-                  Tilføj
-                </button>
-              </form>
+              {/* Add from pool */}
+              {unassignedPlayers.length > 0 && (
+                <div className="mb-4">
+                  <h4 className="font-semibold text-osrs-brown text-sm mb-2">Tilføj fra pulje:</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {unassignedPlayers.map(player => (
+                      <button
+                        key={player.id}
+                        onClick={() => assignPlayerToTeam(player.id, selectedTeam.id)}
+                        className="flex items-center gap-1 bg-green-100 hover:bg-green-200 px-2 py-1 rounded text-sm transition-colors"
+                      >
+                        <UserPlus size={14} className="text-green-600" />
+                        <span className="text-osrs-brown">{player.username}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Update Team Logo */}
               <div className="mb-4 p-3 bg-white bg-opacity-30 rounded">
@@ -477,21 +543,21 @@ function TeamManager({ teams, onUpdate }) {
               {/* Players List */}
               <div className="space-y-2">
                 <h4 className="font-semibold text-osrs-brown text-sm">
-                  Spillere ({selectedTeam.players?.length || 0})
+                  Spillere ({teamPlayers.length})
                 </h4>
-                {!selectedTeam.players?.length ? (
+                {teamPlayers.length === 0 ? (
                   <p className="text-osrs-border text-sm">Ingen spillere endnu</p>
                 ) : (
-                  selectedTeam.players.map(player => (
+                  teamPlayers.map(player => (
                     <div 
                       key={player.id}
                       className="flex items-center justify-between p-2 bg-white bg-opacity-50 rounded"
                     >
                       <span className="text-osrs-brown">{player.username}</span>
                       <button
-                        onClick={() => removePlayer(player.id)}
-                        className="text-red-500 hover:text-red-700 p-1"
-                        title="Fjern spiller"
+                        onClick={() => removePlayerFromTeam(player.id)}
+                        className="text-orange-500 hover:text-orange-700 p-1"
+                        title="Fjern fra hold"
                       >
                         <X size={16} />
                       </button>
