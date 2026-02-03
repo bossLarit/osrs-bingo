@@ -999,6 +999,66 @@ app.post('/api/admin/undo', async (req, res) => {
   }
 });
 
+// ============ POT ============
+
+app.get('/api/pot', async (req, res) => {
+  try {
+    const config = await getConfig();
+    res.json({ 
+      value: config.pot_value || 100000000, 
+      donor: config.pot_donor || 'Anonym' 
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/pot', async (req, res) => {
+  try {
+    const { value, donor } = req.body;
+    const { data: existing } = await supabase.from('config').select('id').limit(1);
+    
+    if (existing && existing.length > 0) {
+      await supabase.from('config')
+        .update({ pot_value: value, pot_donor: donor })
+        .eq('id', existing[0].id);
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ BINGO STATUS ============
+
+app.get('/api/bingo/status', async (req, res) => {
+  try {
+    const config = await getConfig();
+    res.json({
+      active: !!config.event_start,
+      event_start: config.event_start,
+      event_end: config.event_end
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ APPROVED PROOFS ============
+
+app.get('/api/proofs/approved', async (req, res) => {
+  try {
+    const { data: proofs } = await supabase.from('proofs')
+      .select('*')
+      .eq('status', 'approved')
+      .order('created_at', { ascending: false });
+    res.json(proofs || []);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ START SERVER ============
 
 app.listen(PORT, () => {
