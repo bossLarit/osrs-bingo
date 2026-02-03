@@ -216,9 +216,6 @@ function AdminPanel({ teams, tiles, onUpdate }) {
               {loginError}
             </div>
           )}
-          <p className="text-xs text-osrs-border mt-2">
-            Standard adgangskode: admin123
-          </p>
         </form>
       </div>
     );
