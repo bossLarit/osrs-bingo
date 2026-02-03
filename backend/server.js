@@ -264,6 +264,32 @@ app.get('/api/tiles', async (req, res) => {
   }
 });
 
+// Bulk create tiles - MUST be before :id routes
+app.post('/api/tiles/bulk', async (req, res) => {
+  try {
+    const { tiles } = req.body;
+    if (!tiles || !Array.isArray(tiles)) {
+      return res.status(400).json({ error: 'Tiles array required' });
+    }
+    
+    const { data, error } = await supabase.from('tiles').insert(tiles).select();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete all tiles - MUST be before :id routes
+app.delete('/api/tiles/all', async (req, res) => {
+  try {
+    await supabase.from('tiles').delete().neq('id', 0);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/tiles', async (req, res) => {
   try {
     const { name, description, type, metric, target_value, points, image_url, position } = req.body;
@@ -318,31 +344,6 @@ app.delete('/api/tiles/:id', async (req, res) => {
   }
 });
 
-// Bulk create tiles
-app.post('/api/tiles/bulk', async (req, res) => {
-  try {
-    const { tiles } = req.body;
-    if (!tiles || !Array.isArray(tiles)) {
-      return res.status(400).json({ error: 'Tiles array required' });
-    }
-    
-    const { data, error } = await supabase.from('tiles').insert(tiles).select();
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete all tiles
-app.delete('/api/tiles/all', async (req, res) => {
-  try {
-    await supabase.from('tiles').delete().neq('id', 0);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // ============ PROGRESS ROUTES ============
 
