@@ -503,6 +503,104 @@ app.post('/api/sync', async (req, res) => {
   }
 });
 
+// Calculate and update tile progress from WOM data
+app.post('/api/sync/progress', async (req, res) => {
+  try {
+    if (!db.config.event_start) {
+      return res.status(400).json({ error: 'Bingo event not started' });
+    }
+
+    const results = [];
+    const skillTiles = db.tiles.filter(t => t.metric && t.type === 'skill');
+    const bossTiles = db.tiles.filter(t => t.metric && t.type === 'boss');
+    
+    // Group players by team
+    const teamPlayers = {};
+    for (const player of db.players) {
+      if (!teamPlayers[player.team_id]) teamPlayers[player.team_id] = [];
+      teamPlayers[player.team_id].push(player);
+    }
+
+    // For each team, calculate progress on skill/boss tiles
+    for (const [teamId, players] of Object.entries(teamPlayers)) {
+      const teamProgress = {};
+      
+      for (const player of players) {
+        try {
+          // Fetch current stats from WOM
+          const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
+          if (!response.ok) continue;
+          
+          const data = await response.json();
+          const currentStats = data.latestSnapshot?.data;
+          if (!currentStats) continue;
+
+          // Store current stats on player
+          player.current_stats = currentStats;
+          
+          // Calculate XP gained for skill tiles
+          for (const tile of skillTiles) {
+            const metric = tile.metric;
+            const currentXP = currentStats.skills?.[metric]?.experience || 0;
+            const baselineXP = player.baseline_stats?.skills?.[metric]?.experience || 0;
+            const xpGained = Math.max(0, currentXP - baselineXP);
+            
+            if (!teamProgress[tile.id]) teamProgress[tile.id] = 0;
+            teamProgress[tile.id] += xpGained;
+          }
+
+          // Calculate KC gained for boss tiles
+          for (const tile of bossTiles) {
+            const metric = tile.metric;
+            const currentKC = currentStats.bosses?.[metric]?.kills || 0;
+            const baselineKC = player.baseline_stats?.bosses?.[metric]?.kills || 0;
+            const kcGained = Math.max(0, currentKC - baselineKC);
+            
+            if (!teamProgress[tile.id]) teamProgress[tile.id] = 0;
+            teamProgress[tile.id] += kcGained;
+          }
+
+          results.push({ player: player.username, team_id: parseInt(teamId), success: true });
+        } catch (e) {
+          results.push({ player: player.username, team_id: parseInt(teamId), success: false, error: e.message });
+        }
+        
+        // Rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      // Update progress for this team
+      for (const [tileId, value] of Object.entries(teamProgress)) {
+        const tile = db.tiles.find(t => t.id === parseInt(tileId));
+        const existing = db.progress.find(p => p.tile_id === parseInt(tileId) && p.team_id === parseInt(teamId));
+        const completed = tile && value >= (tile.target_value || 1);
+        
+        if (existing) {
+          existing.current_value = value;
+          existing.completed = completed;
+          if (completed && !existing.completed_at) {
+            existing.completed_at = new Date().toISOString();
+          }
+        } else if (value > 0) {
+          db.progress.push({
+            id: db.nextIds.progress++,
+            tile_id: parseInt(tileId),
+            team_id: parseInt(teamId),
+            current_value: value,
+            completed,
+            completed_at: completed ? new Date().toISOString() : null
+          });
+        }
+      }
+    }
+
+    saveDB(db);
+    res.json({ success: true, results, message: `Synced ${results.filter(r => r.success).length} players` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ SAVED BOARDS ============
 
 // Get all saved boards
@@ -1331,16 +1429,30 @@ app.post('/api/bingo/start', async (req, res) => {
     db.config.event_start = now.toISOString();
     db.config.event_end = endTime.toISOString();
     
-    // Save baseline stats for all players
+    // Fetch and save baseline stats for all players from WOM
     const players = db.players || [];
     const playerResults = [];
     
     for (const player of players) {
       try {
-        // Store current stats as baseline
-        player.baseline_stats = player.current_stats || {};
-        player.baseline_timestamp = now.toISOString();
-        playerResults.push({ username: player.username, success: true });
+        // Fetch current stats from WOM
+        const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
+        if (response.ok) {
+          const data = await response.json();
+          const stats = data.latestSnapshot?.data;
+          if (stats) {
+            player.baseline_stats = stats;
+            player.current_stats = stats;
+            player.baseline_timestamp = now.toISOString();
+            playerResults.push({ username: player.username, success: true });
+          } else {
+            playerResults.push({ username: player.username, success: false, error: 'No stats found' });
+          }
+        } else {
+          playerResults.push({ username: player.username, success: false, error: 'Player not found on WOM' });
+        }
+        // Rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
       } catch (err) {
         playerResults.push({ username: player.username, success: false, error: err.message });
       }

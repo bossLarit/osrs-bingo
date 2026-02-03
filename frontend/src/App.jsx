@@ -145,7 +145,10 @@ function App() {
   const syncWithWOM = async () => {
     setSyncing(true);
     try {
+      // Sync player data from WOM
       await fetch(apiUrl('/api/sync'), { method: 'POST' });
+      // Calculate and update progress based on XP/KC gains
+      await fetch(apiUrl('/api/sync/progress'), { method: 'POST' });
       await fetchData();
     } catch (error) {
       console.error('Error syncing:', error);
