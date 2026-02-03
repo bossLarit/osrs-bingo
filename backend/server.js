@@ -755,8 +755,36 @@ app.post('/api/votes', async (req, res) => {
 
 // ============ WOM SYNC ============
 
+// Rate limit: 1 sync per hour
+let lastSyncTime = null;
+const SYNC_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
+app.get('/api/sync/status', async (req, res) => {
+  const now = Date.now();
+  const canSync = !lastSyncTime || (now - lastSyncTime) >= SYNC_COOLDOWN_MS;
+  const nextSyncIn = lastSyncTime ? Math.max(0, SYNC_COOLDOWN_MS - (now - lastSyncTime)) : 0;
+  res.json({ 
+    canSync, 
+    nextSyncIn,
+    nextSyncAt: lastSyncTime ? new Date(lastSyncTime + SYNC_COOLDOWN_MS).toISOString() : null
+  });
+});
+
 app.post('/api/sync', async (req, res) => {
   try {
+    // Check rate limit
+    const now = Date.now();
+    if (lastSyncTime && (now - lastSyncTime) < SYNC_COOLDOWN_MS) {
+      const remainingMs = SYNC_COOLDOWN_MS - (now - lastSyncTime);
+      const remainingMin = Math.ceil(remainingMs / 60000);
+      return res.status(429).json({ 
+        error: `Sync er på cooldown. Prøv igen om ${remainingMin} minutter.`,
+        nextSyncIn: remainingMs
+      });
+    }
+    
+    lastSyncTime = now;
+    
     const { data: players } = await supabase.from('players').select('*');
     const results = [];
     

@@ -185,7 +185,14 @@ function App() {
     setSyncing(true);
     try {
       // Sync player data from WOM
-      await fetch(apiUrl('/api/sync'), { method: 'POST' });
+      const syncRes = await fetch(apiUrl('/api/sync'), { method: 'POST' });
+      
+      if (syncRes.status === 429) {
+        const data = await syncRes.json();
+        alert(data.error || 'Sync er på cooldown. Prøv igen senere.');
+        return;
+      }
+      
       // Calculate and update progress based on XP/KC gains
       await fetch(apiUrl('/api/sync/progress'), { method: 'POST' });
       await fetchData();
