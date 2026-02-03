@@ -2,11 +2,16 @@ import { useState, useEffect } from 'react';
 import { BarChart3, Trophy, Award, Star, TrendingUp, Download, Clock } from 'lucide-react';
 import { apiUrl } from '../api';
 
-function Stats({ teams, tiles, progress }) {
+function Stats({ teams = [], tiles = [], progress = [] }) {
   const [history, setHistory] = useState([]);
   const [achievements, setAchievements] = useState([]);
   const [mvps, setMvps] = useState([]);
   const [config, setConfig] = useState({});
+  
+  // Ensure props are arrays
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  const safeTiles = Array.isArray(tiles) ? tiles : [];
+  const safeProgress = Array.isArray(progress) ? progress : [];
 
   useEffect(() => {
     fetchStats();
@@ -77,10 +82,10 @@ function Stats({ teams, tiles, progress }) {
   };
 
   // Calculate current scores
-  const teamScores = teams.map(team => {
-    const teamProgress = progress.filter(p => p.team_id === team.id && p.completed);
+  const teamScores = safeTeams.map(team => {
+    const teamProgress = safeProgress.filter(p => p.team_id === team.id && p.completed);
     const points = teamProgress.reduce((sum, p) => {
-      const tile = tiles.find(t => t.id === p.tile_id);
+      const tile = safeTiles.find(t => t.id === p.tile_id);
       return sum + (tile?.points || 0);
     }, 0);
     return { ...team, points, completed: teamProgress.length };
@@ -100,7 +105,7 @@ function Stats({ teams, tiles, progress }) {
     const height = 300;
     const padding = 40;
     
-    const allPoints = history.flatMap(h => h.scores.map(s => s.points));
+    const allPoints = history.flatMap(h => (h.scores || []).map(s => s.points));
     const maxPoints = Math.max(...allPoints, 1);
     
     const xScale = (i) => padding + (i / (history.length - 1)) * (width - 2 * padding);
@@ -132,9 +137,9 @@ function Stats({ teams, tiles, progress }) {
         ))}
 
         {/* Lines for each team */}
-        {teams.map(team => {
+        {safeTeams.map(team => {
           const points = history.map((h, i) => {
-            const score = h.scores.find(s => s.team_id === team.id);
+            const score = (h.scores || []).find(s => s.team_id === team.id);
             return { x: xScale(i), y: yScale(score?.points || 0) };
           });
           
@@ -273,7 +278,7 @@ function Stats({ teams, tiles, progress }) {
         
         {/* Legend */}
         <div className="flex flex-wrap justify-center gap-4 mt-4">
-          {teams.map(team => (
+          {safeTeams.map(team => (
             <div key={team.id} className="flex items-center gap-2">
               <div 
                 className="w-4 h-4 rounded"
