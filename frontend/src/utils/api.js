@@ -3,7 +3,7 @@
  * Centralized API handling with proper error management
  */
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const API_URL = import.meta.env.VITE_API_URL || 'https://osrs-bingo-api.onrender.com';
 
 /**
  * Constructs the full API URL
