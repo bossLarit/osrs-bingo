@@ -1154,10 +1154,10 @@ app.post('/api/bingo/reset', async (req, res) => {
     }
     
     // Clear all progress
-    await supabase.from('progress').delete().neq('id', 0);
+    await supabase.from('progress').delete().gte('id', 0);
     
     // Clear baseline stats
-    await supabase.from('players').update({ baseline_stats: null, baseline_timestamp: null }).neq('id', 0);
+    await supabase.from('players').update({ baseline_stats: null, baseline_timestamp: null }).gte('id', 0);
     
     await logActivity('BINGO_RESET', 'Bingo event nulstillet', 'Admin');
     res.json({ success: true });
