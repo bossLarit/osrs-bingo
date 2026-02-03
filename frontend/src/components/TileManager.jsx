@@ -211,7 +211,7 @@ function TileManager({ tiles, teams, onUpdate }) {
         ? `/api/tiles/${editingTile.id}`
         : '/api/tiles';
       
-      await fetch(url, {
+      await fetch(apiUrl(url), {
         method: editingTile ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
