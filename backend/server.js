@@ -1,11 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -13,197 +8,128 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// JSON file-based database
-const DB_PATH = join(__dirname, 'data.json');
+// Supabase client
+const supabaseUrl = process.env.SUPABASE_URL || 'https://aikkggrnddyjjbprvkwm.supabase.co';
+const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpa2tnZ3JuZGR5ampicHJ2a3dtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzg1ODM4NzcsImV4cCI6MjA1NDE1OTg3N30.sb_publishable_N2t-kXVQqOnsNWNoIrs4mw_fcbWxbDr';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-const defaultData = {
-  teams: [],
-  players: [],
-  tiles: [],
-  progress: [],
-  config: { 
-    name: 'OSRS Bingo', 
-    grid_size: 7, 
-    active: true, 
-    admin_password: process.env.ADMIN_PASSWORD || 'changeme',
-    site_pin: process.env.SITE_PIN || '1234',
-    event_start: null,
-    event_end: null,
-    sounds_enabled: true,
-    dark_mode: false,
-    pot_value: 100000000,
-    pot_donor: 'Anonym'
-  },
-  boards: [],
-  proofs: [],
-  rules: '',
-  history: [],
-  actionLog: [],
-  chatMessages: [],
-  tileVotes: {},
-  nextIds: { team: 1, player: 1, tile: 1, progress: 1, board: 1, proof: 1, chat: 1 }
-};
+// Default passwords from env
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
+const SITE_PIN = process.env.SITE_PIN || '1234';
 
-function loadDB() {
+console.log('Connected to Supabase:', supabaseUrl);
+
+// ============ HELPER FUNCTIONS ============
+
+async function logActivity(action, details, actor = 'System') {
   try {
-    if (existsSync(DB_PATH)) {
-      return JSON.parse(readFileSync(DB_PATH, 'utf-8'));
-    }
+    await supabase.from('action_logs').insert({ action, details, actor });
   } catch (e) {
-    console.error('Error loading DB:', e);
+    console.error('Error logging activity:', e);
   }
-  return { ...defaultData };
 }
 
-function saveDB(data) {
-  writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
-}
-
-let db = loadDB();
-
-// Override admin password with environment variable
-if (process.env.ADMIN_PASSWORD) {
-  db.config.admin_password = process.env.ADMIN_PASSWORD;
-  console.log('Admin password loaded from environment variable');
-}
-
-// ============ ACTIVITY LOG ============
-
-function logActivity(action, details, actor = 'System') {
-  if (!db.actionLog) db.actionLog = [];
-  
-  const logEntry = {
-    id: Date.now(),
-    timestamp: new Date().toISOString(),
-    action,
-    details,
-    actor
+async function getConfig() {
+  const { data } = await supabase.from('config').select('*').single();
+  return data || { 
+    admin_password: ADMIN_PASSWORD, 
+    site_pin: SITE_PIN,
+    name: 'OSRS Bingo',
+    grid_size: 7
   };
-  
-  db.actionLog.unshift(logEntry); // Add to beginning
-  
-  // Keep only last 500 entries
-  if (db.actionLog.length > 500) {
-    db.actionLog = db.actionLog.slice(0, 500);
-  }
-  
-  saveDB(db);
-  return logEntry;
 }
-
-// Get activity logs (admin only)
-app.get('/api/admin/logs', (req, res) => {
-  try {
-    const { limit = 100 } = req.query;
-    const logs = (db.actionLog || []).slice(0, parseInt(limit));
-    res.json(logs);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Clear logs (admin only)
-app.delete('/api/admin/logs', (req, res) => {
-  try {
-    const { admin_password } = req.body;
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid password' });
-    }
-    
-    db.actionLog = [];
-    saveDB(db);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // ============ TEAM ROUTES ============
 
-// Get all teams
-app.get('/api/teams', (req, res) => {
+app.get('/api/teams', async (req, res) => {
   try {
-    const teams = db.teams.map(t => {
-      const teamPlayers = db.players.filter(p => p.team_id === t.id);
+    const { data: teams } = await supabase.from('teams').select('*');
+    const { data: players } = await supabase.from('players').select('*');
+    
+    const teamsWithMembers = (teams || []).map(t => {
+      const teamPlayers = (players || []).filter(p => p.team_id === t.id);
       return {
         ...t,
         player_count: teamPlayers.length,
         members: teamPlayers.map(p => p.username)
       };
     });
-    res.json(teams);
+    res.json(teamsWithMembers);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get single team with players
-app.get('/api/teams/:id', (req, res) => {
+app.get('/api/teams/:id', async (req, res) => {
   try {
     const teamId = parseInt(req.params.id);
-    const team = db.teams.find(t => t.id === teamId);
-    if (!team) {
-      return res.status(404).json({ error: 'Team not found' });
-    }
-    const players = db.players.filter(p => p.team_id === teamId);
-    res.json({ ...team, players });
+    const { data: team } = await supabase.from('teams').select('*').eq('id', teamId).single();
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+    
+    const { data: players } = await supabase.from('players').select('*').eq('team_id', teamId);
+    res.json({ ...team, players: players || [] });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Create team
-app.post('/api/teams', (req, res) => {
+app.post('/api/teams', async (req, res) => {
   try {
     const { name, color, logo_url } = req.body;
-    if (!name) {
-      return res.status(400).json({ error: 'Team name is required' });
-    }
-    if (db.teams.some(t => t.name === name)) {
+    if (!name) return res.status(400).json({ error: 'Team name is required' });
+    
+    const { data: existing } = await supabase.from('teams').select('id').eq('name', name);
+    if (existing && existing.length > 0) {
       return res.status(400).json({ error: 'Team name already exists' });
     }
-    const team = {
-      id: db.nextIds.team++,
-      name,
-      color: color || '#3b82f6',
-      logo_url: logo_url || '',
-      created_at: new Date().toISOString()
-    };
-    db.teams.push(team);
-    saveDB(db);
-    logActivity('TEAM_CREATED', `Hold "${name}" oprettet`);
-    res.status(201).json(team);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update team
-app.put('/api/teams/:id', (req, res) => {
-  try {
-    const teamId = parseInt(req.params.id);
-    const { name, color, logo_url } = req.body;
-    const team = db.teams.find(t => t.id === teamId);
-    if (team) {
-      if (name) team.name = name;
-      if (color) team.color = color;
-      if (logo_url !== undefined) team.logo_url = logo_url;
-      saveDB(db);
-    }
+    
+    const { data: team, error } = await supabase.from('teams')
+      .insert({ name, color: color || '#3b82f6', logo_url })
+      .select()
+      .single();
+    
+    if (error) throw error;
+    await logActivity('TEAM_CREATED', `Hold "${name}" oprettet`);
     res.json(team);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Delete team
-app.delete('/api/teams/:id', (req, res) => {
+app.put('/api/teams/:id', async (req, res) => {
   try {
     const teamId = parseInt(req.params.id);
-    db.teams = db.teams.filter(t => t.id !== teamId);
-    db.players = db.players.filter(p => p.team_id !== teamId);
-    db.progress = db.progress.filter(p => p.team_id !== teamId);
-    saveDB(db);
+    const { name, color, logo_url } = req.body;
+    
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (color !== undefined) updates.color = color;
+    if (logo_url !== undefined) updates.logo_url = logo_url;
+    
+    const { data: team, error } = await supabase.from('teams')
+      .update(updates)
+      .eq('id', teamId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    res.json(team);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/teams/:id', async (req, res) => {
+  try {
+    const teamId = parseInt(req.params.id);
+    
+    // Remove team association from players
+    await supabase.from('players').update({ team_id: null }).eq('team_id', teamId);
+    // Delete progress
+    await supabase.from('progress').delete().eq('team_id', teamId);
+    // Delete team
+    await supabase.from('teams').delete().eq('id', teamId);
+    
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -212,107 +138,106 @@ app.delete('/api/teams/:id', (req, res) => {
 
 // ============ PLAYER ROUTES ============
 
-// Add player to pool (no team)
-app.post('/api/players', (req, res) => {
+app.get('/api/players', async (req, res) => {
+  try {
+    const { data: players } = await supabase.from('players').select('*');
+    res.json(players || []);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/players', async (req, res) => {
   try {
     const { username } = req.body;
+    if (!username) return res.status(400).json({ error: 'Username is required' });
     
-    if (!username) {
-      return res.status(400).json({ error: 'Username is required' });
-    }
-    
-    if (db.players.some(p => p.username.toLowerCase() === username.toLowerCase())) {
+    const { data: existing } = await supabase.from('players').select('id').eq('username', username);
+    if (existing && existing.length > 0) {
       return res.status(400).json({ error: 'Player already exists' });
     }
-
-    const player = {
-      id: db.nextIds.player++,
-      username,
-      team_id: null,
-      wom_id: null,
-      created_at: new Date().toISOString()
-    };
-    db.players.push(player);
-    saveDB(db);
-    logActivity('PLAYER_ADDED', `Spiller "${username}" tilføjet til pulje`);
-    res.status(201).json(player);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Add player to team
-app.post('/api/teams/:teamId/players', (req, res) => {
-  try {
-    const { username } = req.body;
-    const teamId = parseInt(req.params.teamId);
     
-    if (!username) {
-      return res.status(400).json({ error: 'Username is required' });
-    }
+    const { data: player, error } = await supabase.from('players')
+      .insert({ username })
+      .select()
+      .single();
     
-    if (db.players.some(p => p.username.toLowerCase() === username.toLowerCase() && p.team_id === teamId)) {
-      return res.status(400).json({ error: 'Player already in this team' });
-    }
-
-    // Check if player exists in pool
-    const existingPlayer = db.players.find(p => p.username.toLowerCase() === username.toLowerCase());
-    if (existingPlayer) {
-      existingPlayer.team_id = teamId;
-      saveDB(db);
-      return res.json(existingPlayer);
-    }
-
-    const player = {
-      id: db.nextIds.player++,
-      username,
-      team_id: teamId,
-      wom_id: null,
-      created_at: new Date().toISOString()
-    };
-    db.players.push(player);
-    saveDB(db);
-    res.status(201).json(player);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Assign player to team
-app.put('/api/players/:id/team', (req, res) => {
-  try {
-    const playerId = parseInt(req.params.id);
-    const { team_id } = req.body;
-    
-    const player = db.players.find(p => p.id === playerId);
-    if (!player) {
-      return res.status(404).json({ error: 'Player not found' });
-    }
-    
-    const team = team_id ? db.teams.find(t => t.id === team_id) : null;
-    const oldTeam = player.team_id ? db.teams.find(t => t.id === player.team_id) : null;
-    player.team_id = team_id;
-    saveDB(db);
-    if (team) {
-      logActivity('PLAYER_ASSIGNED', `"${player.username}" tildelt til "${team.name}"`, player.username);
-    } else if (oldTeam) {
-      logActivity('PLAYER_REMOVED', `"${player.username}" fjernet fra "${oldTeam.name}"`, player.username);
-    }
+    if (error) throw error;
+    await logActivity('PLAYER_ADDED', `Spiller "${username}" tilføjet til pulje`);
     res.json(player);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Remove player from team
-app.delete('/api/players/:id', (req, res) => {
+app.post('/api/teams/:teamId/players', async (req, res) => {
+  try {
+    const teamId = parseInt(req.params.teamId);
+    const { username } = req.body;
+    
+    // Check if player already exists
+    const { data: existing } = await supabase.from('players').select('*').eq('username', username);
+    
+    if (existing && existing.length > 0) {
+      // Update existing player's team
+      const { data: player, error } = await supabase.from('players')
+        .update({ team_id: teamId })
+        .eq('id', existing[0].id)
+        .select()
+        .single();
+      if (error) throw error;
+      return res.json(player);
+    }
+    
+    // Create new player
+    const { data: player, error } = await supabase.from('players')
+      .insert({ username, team_id: teamId })
+      .select()
+      .single();
+    
+    if (error) throw error;
+    await logActivity('PLAYER_ADDED', `Spiller "${username}" tilføjet`);
+    res.json(player);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/players/:id/team', async (req, res) => {
   try {
     const playerId = parseInt(req.params.id);
-    const player = db.players.find(p => p.id === playerId);
-    db.players = db.players.filter(p => p.id !== playerId);
-    saveDB(db);
+    const { team_id } = req.body;
+    
+    const { data: player, error } = await supabase.from('players')
+      .update({ team_id: team_id || null })
+      .eq('id', playerId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    if (team_id) {
+      const { data: team } = await supabase.from('teams').select('name').eq('id', team_id).single();
+      await logActivity('PLAYER_ASSIGNED', `"${player.username}" tildelt til "${team?.name}"`);
+    } else {
+      await logActivity('PLAYER_REMOVED', `"${player.username}" fjernet fra hold`);
+    }
+    
+    res.json(player);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/players/:id', async (req, res) => {
+  try {
+    const playerId = parseInt(req.params.id);
+    
+    const { data: player } = await supabase.from('players').select('username').eq('id', playerId).single();
+    await supabase.from('players').delete().eq('id', playerId);
+    
     if (player) {
-      logActivity('PLAYER_DELETED', `Spiller "${player.username}" slettet`);
+      await logActivity('PLAYER_DELETED', `Spiller "${player.username}" slettet`);
     }
     res.json({ success: true });
   } catch (error) {
@@ -320,127 +245,65 @@ app.delete('/api/players/:id', (req, res) => {
   }
 });
 
-// Get all players
-app.get('/api/players', (req, res) => {
+// ============ TILES ROUTES ============
+
+app.get('/api/tiles', async (req, res) => {
   try {
-    const players = db.players.map(p => {
-      const team = db.teams.find(t => t.id === p.team_id);
-      return { ...p, team_name: team?.name, team_color: team?.color };
-    });
-    res.json(players);
+    const { data: tiles } = await supabase.from('tiles').select('*').order('position');
+    res.json(tiles || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// ============ BINGO TILE ROUTES ============
-
-// Get all tiles
-app.get('/api/tiles', (req, res) => {
-  try {
-    const tiles = [...db.tiles].sort((a, b) => a.position - b.position);
-    res.json(tiles);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Create tile
-app.post('/api/tiles', (req, res) => {
+app.post('/api/tiles', async (req, res) => {
   try {
     const { name, description, type, metric, target_value, points, image_url, position } = req.body;
-    const tile = {
-      id: db.nextIds.tile++,
-      name,
-      description: description || '',
-      type: type || 'kills',
-      metric: metric || '',
-      target_value: target_value || 1,
-      points: points || 1,
-      image_url: image_url || '',
-      position: position ?? db.tiles.length
-    };
-    db.tiles.push(tile);
-    saveDB(db);
-    res.status(201).json(tile);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update tile
-app.put('/api/tiles/:id', (req, res) => {
-  try {
-    const tileId = parseInt(req.params.id);
-    const { name, description, type, metric, target_value, points, image_url, position } = req.body;
-    const tile = db.tiles.find(t => t.id === tileId);
-    if (tile) {
-      if (name !== undefined) tile.name = name;
-      if (description !== undefined) tile.description = description;
-      if (type !== undefined) tile.type = type;
-      if (metric !== undefined) tile.metric = metric;
-      if (target_value !== undefined) tile.target_value = target_value;
-      if (points !== undefined) tile.points = points;
-      if (image_url !== undefined) tile.image_url = image_url;
-      if (position !== undefined) tile.position = position;
-      saveDB(db);
-    }
+    
+    const { data: tile, error } = await supabase.from('tiles')
+      .insert({ name, description, type, metric, target_value, points, image_url, position })
+      .select()
+      .single();
+    
+    if (error) throw error;
     res.json(tile);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Delete tile
-app.delete('/api/tiles/:id', (req, res) => {
+app.put('/api/tiles/:id', async (req, res) => {
   try {
     const tileId = parseInt(req.params.id);
-    db.tiles = db.tiles.filter(t => t.id !== tileId);
-    db.progress = db.progress.filter(p => p.tile_id !== tileId);
-    saveDB(db);
-    res.json({ success: true });
+    const { name, description, type, metric, target_value, points, image_url, position } = req.body;
+    
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (description !== undefined) updates.description = description;
+    if (type !== undefined) updates.type = type;
+    if (metric !== undefined) updates.metric = metric;
+    if (target_value !== undefined) updates.target_value = target_value;
+    if (points !== undefined) updates.points = points;
+    if (image_url !== undefined) updates.image_url = image_url;
+    if (position !== undefined) updates.position = position;
+    
+    const { data: tile, error } = await supabase.from('tiles')
+      .update(updates)
+      .eq('id', tileId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    res.json(tile);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Bulk create tiles
-app.post('/api/tiles/bulk', (req, res) => {
+app.delete('/api/tiles/:id', async (req, res) => {
   try {
-    const { tiles } = req.body;
-    for (const tileData of tiles) {
-      const existing = db.tiles.find(t => t.position === tileData.position);
-      if (existing) {
-        Object.assign(existing, tileData);
-      } else {
-        const tile = {
-          id: db.nextIds.tile++,
-          name: tileData.name,
-          description: tileData.description || '',
-          type: tileData.type || 'kills',
-          metric: tileData.metric || '',
-          target_value: tileData.target_value || 1,
-          points: tileData.points || 1,
-          image_url: tileData.image_url || '',
-          position: tileData.position
-        };
-        db.tiles.push(tile);
-      }
-    }
-    saveDB(db);
-    const allTiles = [...db.tiles].sort((a, b) => a.position - b.position);
-    res.status(201).json(allTiles);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete ALL tiles
-app.delete('/api/tiles/all', (req, res) => {
-  try {
-    db.tiles = [];
-    db.progress = [];
-    saveDB(db);
+    const tileId = parseInt(req.params.id);
+    await supabase.from('tiles').delete().eq('id', tileId);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -449,63 +312,333 @@ app.delete('/api/tiles/all', (req, res) => {
 
 // ============ PROGRESS ROUTES ============
 
-// Get tile progress for all teams
-app.get('/api/progress', (req, res) => {
+app.get('/api/progress', async (req, res) => {
   try {
-    const progress = db.progress.map(p => {
-      const team = db.teams.find(t => t.id === p.team_id);
-      const tile = db.tiles.find(t => t.id === p.tile_id);
-      return {
-        ...p,
-        team_name: team?.name,
-        team_color: team?.color,
-        tile_name: tile?.name
-      };
-    });
-    res.json(progress);
+    const { data: progress } = await supabase.from('progress').select('*');
+    res.json(progress || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get progress for specific tile
-app.get('/api/tiles/:tileId/progress', (req, res) => {
-  try {
-    const tileId = parseInt(req.params.tileId);
-    const progress = db.progress
-      .filter(p => p.tile_id === tileId)
-      .map(p => {
-        const team = db.teams.find(t => t.id === p.team_id);
-        return { ...p, team_name: team?.name, team_color: team?.color };
-      })
-      .sort((a, b) => b.current_value - a.current_value);
-    res.json(progress);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update progress for a tile/team
-app.post('/api/progress', (req, res) => {
+app.post('/api/progress', async (req, res) => {
   try {
     const { tile_id, team_id, current_value, completed } = req.body;
     
-    const existing = db.progress.find(p => p.tile_id === tile_id && p.team_id === team_id);
-    if (existing) {
-      existing.current_value = current_value;
-      existing.completed = completed;
-      existing.completed_at = completed ? new Date().toISOString() : null;
-    } else {
-      db.progress.push({
-        id: db.nextIds.progress++,
-        tile_id,
-        team_id,
-        current_value,
+    // Upsert progress
+    const { data: existing } = await supabase.from('progress')
+      .select('*')
+      .eq('tile_id', tile_id)
+      .eq('team_id', team_id);
+    
+    if (existing && existing.length > 0) {
+      const { data: progress, error } = await supabase.from('progress')
+        .update({ 
+          current_value, 
+          completed, 
+          completed_at: completed ? new Date().toISOString() : null 
+        })
+        .eq('id', existing[0].id)
+        .select()
+        .single();
+      if (error) throw error;
+      return res.json(progress);
+    }
+    
+    const { data: progress, error } = await supabase.from('progress')
+      .insert({ 
+        tile_id, 
+        team_id, 
+        current_value, 
         completed,
         completed_at: completed ? new Date().toISOString() : null
-      });
+      })
+      .select()
+      .single();
+    
+    if (error) throw error;
+    res.json(progress);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ PROOFS ROUTES ============
+
+app.get('/api/proofs', async (req, res) => {
+  try {
+    const { data: proofs } = await supabase.from('proofs').select('*').order('created_at', { ascending: false });
+    
+    // Add tile and team names
+    const { data: tiles } = await supabase.from('tiles').select('id, name');
+    const { data: teams } = await supabase.from('teams').select('id, name');
+    
+    const enrichedProofs = (proofs || []).map(p => ({
+      ...p,
+      tile_name: tiles?.find(t => t.id === p.tile_id)?.name,
+      team_name: teams?.find(t => t.id === p.team_id)?.name
+    }));
+    
+    res.json(enrichedProofs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/proofs', async (req, res) => {
+  try {
+    const { tile_id, team_id, player_name, image_url, notes } = req.body;
+    
+    const { data: proof, error } = await supabase.from('proofs')
+      .insert({ tile_id, team_id, player_name, image_url, notes, status: 'pending' })
+      .select()
+      .single();
+    
+    if (error) throw error;
+    res.json(proof);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/proofs/:id', async (req, res) => {
+  try {
+    const proofId = parseInt(req.params.id);
+    const { status, admin_password } = req.body;
+    
+    const config = await getConfig();
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
     }
-    saveDB(db);
+    
+    const { data: proof } = await supabase.from('proofs').select('*').eq('id', proofId).single();
+    
+    const { data: updatedProof, error } = await supabase.from('proofs')
+      .update({ status })
+      .eq('id', proofId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    // If approved, update progress
+    if (status === 'approved' && proof) {
+      const { data: existing } = await supabase.from('progress')
+        .select('*')
+        .eq('tile_id', proof.tile_id)
+        .eq('team_id', proof.team_id);
+      
+      if (existing && existing.length > 0) {
+        await supabase.from('progress')
+          .update({ completed: true, completed_at: new Date().toISOString() })
+          .eq('id', existing[0].id);
+      } else {
+        await supabase.from('progress')
+          .insert({ tile_id: proof.tile_id, team_id: proof.team_id, completed: true, completed_at: new Date().toISOString() });
+      }
+      
+      await logActivity('PROOF_APPROVED', `Bevis godkendt for tile ${proof.tile_id}`, 'Admin');
+    } else if (status === 'rejected') {
+      await logActivity('PROOF_REJECTED', `Bevis afvist for tile ${proof?.tile_id}`, 'Admin');
+    }
+    
+    res.json(updatedProof);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/proofs/:id', async (req, res) => {
+  try {
+    const proofId = parseInt(req.params.id);
+    await supabase.from('proofs').delete().eq('id', proofId);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ CONFIG ROUTES ============
+
+app.get('/api/config', async (req, res) => {
+  try {
+    const config = await getConfig();
+    res.json(config);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/config', async (req, res) => {
+  try {
+    const updates = req.body;
+    
+    const { data: existing } = await supabase.from('config').select('id').limit(1);
+    
+    if (existing && existing.length > 0) {
+      const { data: config, error } = await supabase.from('config')
+        .update(updates)
+        .eq('id', existing[0].id)
+        .select()
+        .single();
+      if (error) throw error;
+      return res.json(config);
+    }
+    
+    const { data: config, error } = await supabase.from('config')
+      .insert(updates)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(config);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ ADMIN ROUTES ============
+
+app.post('/api/admin/verify', async (req, res) => {
+  try {
+    const { password } = req.body;
+    const config = await getConfig();
+    const isValid = password === config.admin_password || password === ADMIN_PASSWORD;
+    res.json({ valid: isValid });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/verify-pin', async (req, res) => {
+  try {
+    const { pin } = req.body;
+    const clientIp = req.ip || req.connection?.remoteAddress || 'unknown';
+    
+    // Check lockout
+    const { data: attempt } = await supabase.from('failed_pin_attempts')
+      .select('*')
+      .eq('client_ip', clientIp)
+      .single();
+    
+    if (attempt?.locked) {
+      return res.json({ valid: false, locked: true, message: 'For mange forsøg. Kontakt admin.' });
+    }
+    
+    const config = await getConfig();
+    const isValid = pin === config.site_pin || pin === SITE_PIN;
+    
+    if (isValid) {
+      // Reset attempts
+      if (attempt) {
+        await supabase.from('failed_pin_attempts').delete().eq('client_ip', clientIp);
+      }
+      return res.json({ valid: true });
+    }
+    
+    // Increment failed attempts
+    const count = (attempt?.count || 0) + 1;
+    const locked = count >= 5;
+    
+    if (attempt) {
+      await supabase.from('failed_pin_attempts')
+        .update({ count, locked, updated_at: new Date().toISOString() })
+        .eq('client_ip', clientIp);
+    } else {
+      await supabase.from('failed_pin_attempts')
+        .insert({ client_ip: clientIp, count, locked });
+    }
+    
+    if (locked) {
+      await logActivity('PIN_LOCKOUT', `IP ${clientIp} låst efter 5 forkerte PIN forsøg`);
+    }
+    
+    const remaining = 5 - count;
+    res.json({ 
+      valid: false, 
+      locked,
+      remaining: remaining > 0 ? remaining : 0,
+      message: locked ? 'For mange forsøg. Kontakt admin.' : `Forkert PIN. ${remaining} forsøg tilbage.`
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/admin/pin', async (req, res) => {
+  try {
+    const { admin_password, new_pin } = req.body;
+    const config = await getConfig();
+    
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    if (!new_pin || new_pin.length < 4) {
+      return res.status(400).json({ error: 'PIN skal være mindst 4 tegn' });
+    }
+    
+    const { data: existing } = await supabase.from('config').select('id').limit(1);
+    if (existing && existing.length > 0) {
+      await supabase.from('config').update({ site_pin: new_pin }).eq('id', existing[0].id);
+    }
+    
+    await logActivity('PIN_CHANGED', 'Site PIN kode ændret', 'Admin');
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/assign-tile', async (req, res) => {
+  try {
+    const { tile_id, team_id, admin_password } = req.body;
+    const config = await getConfig();
+    
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    // Remove existing completions for this tile
+    await supabase.from('progress').delete().eq('tile_id', tile_id).eq('completed', true);
+    
+    // Add new completion
+    await supabase.from('progress').insert({
+      tile_id,
+      team_id,
+      current_value: 1,
+      completed: true,
+      completed_at: new Date().toISOString()
+    });
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/admin/logs', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const { data: logs } = await supabase.from('action_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    res.json(logs || []);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/admin/logs', async (req, res) => {
+  try {
+    const { admin_password } = req.body;
+    const config = await getConfig();
+    
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    await supabase.from('action_logs').delete().neq('id', 0);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -514,13 +647,17 @@ app.post('/api/progress', (req, res) => {
 
 // ============ SCOREBOARD ============
 
-app.get('/api/scoreboard', (req, res) => {
+app.get('/api/scoreboard', async (req, res) => {
   try {
-    const scoreboard = db.teams.map(team => {
-      const teamProgress = db.progress.filter(p => p.team_id === team.id && p.completed);
+    const { data: teams } = await supabase.from('teams').select('*');
+    const { data: progress } = await supabase.from('progress').select('*').eq('completed', true);
+    const { data: tiles } = await supabase.from('tiles').select('id, points');
+    
+    const scoreboard = (teams || []).map(team => {
+      const teamProgress = (progress || []).filter(p => p.team_id === team.id);
       const total_points = teamProgress.reduce((sum, p) => {
-        const tile = db.tiles.find(t => t.id === p.tile_id);
-        return sum + (tile?.points || 0);
+        const tile = tiles?.find(t => t.id === p.tile_id);
+        return sum + (tile?.points || 1);
       }, 0);
       return {
         id: team.id,
@@ -530,1104 +667,113 @@ app.get('/api/scoreboard', (req, res) => {
         tiles_completed: teamProgress.length
       };
     }).sort((a, b) => b.total_points - a.total_points || b.tiles_completed - a.tiles_completed);
+    
     res.json(scoreboard);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// ============ BINGO CONFIG ============
+// ============ VOTES ============
 
-app.get('/api/config', (req, res) => {
+app.get('/api/votes', async (req, res) => {
   try {
-    res.json(db.config);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.put('/api/config', (req, res) => {
-  try {
-    const { name, start_date, end_date, grid_size } = req.body;
-    if (name !== undefined) db.config.name = name;
-    if (start_date !== undefined) db.config.start_date = start_date;
-    if (end_date !== undefined) db.config.end_date = end_date;
-    if (grid_size !== undefined) db.config.grid_size = grid_size;
-    saveDB(db);
-    res.json(db.config);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ WISE OLD MAN PROXY ============
-
-app.get('/api/wom/player/:username', async (req, res) => {
-  try {
-    const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(req.params.username)}`);
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/wom/player/:username/gained', async (req, res) => {
-  try {
-    const { period } = req.query;
-    const url = `https://api.wiseoldman.net/v2/players/${encodeURIComponent(req.params.username)}/gained?period=${period || 'week'}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/wom/player/:username/update', async (req, res) => {
-  try {
-    const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(req.params.username)}`, {
-      method: 'POST'
+    const { data: votes } = await supabase.from('tile_votes').select('*');
+    
+    // Group by tile_id
+    const votesByTile = {};
+    (votes || []).forEach(v => {
+      if (!votesByTile[v.tile_id]) votesByTile[v.tile_id] = { up: 0, down: 0 };
+      if (v.vote > 0) votesByTile[v.tile_id].up++;
+      if (v.vote < 0) votesByTile[v.tile_id].down++;
     });
-    const data = await response.json();
-    res.json(data);
+    
+    res.json(votesByTile);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Sync player data from WOM
+app.post('/api/votes', async (req, res) => {
+  try {
+    const { tile_id, player_name, vote } = req.body;
+    
+    const { data: existing } = await supabase.from('tile_votes')
+      .select('*')
+      .eq('tile_id', tile_id)
+      .eq('player_name', player_name);
+    
+    if (existing && existing.length > 0) {
+      await supabase.from('tile_votes')
+        .update({ vote })
+        .eq('id', existing[0].id);
+    } else {
+      await supabase.from('tile_votes')
+        .insert({ tile_id, player_name, vote });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ WOM SYNC ============
+
 app.post('/api/sync', async (req, res) => {
   try {
+    const { data: players } = await supabase.from('players').select('*');
     const results = [];
     
-    for (const player of db.players) {
+    for (const player of (players || [])) {
       try {
-        // First, trigger an UPDATE on WOM to get fresh data from hiscores
-        const updateResponse = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`, {
+        // Trigger WOM update
+        await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         });
         
-        // Wait a bit for WOM to process the update
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Then fetch the updated player data
+        // Fetch updated data
         const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
         if (response.ok) {
           const data = await response.json();
-          if (data.id) {
-            player.wom_id = data.id;
-          }
-          // Store the latest snapshot data
-          if (data.latestSnapshot?.data) {
-            player.current_stats = data.latestSnapshot.data;
-            player.wom_data = data;
-          }
-          results.push({ username: player.username, success: true, updated: updateResponse.ok, data });
+          
+          await supabase.from('players')
+            .update({ 
+              wom_id: data.id,
+              wom_data: data,
+              current_stats: data.latestSnapshot?.data
+            })
+            .eq('id', player.id);
+          
+          results.push({ username: player.username, success: true });
         } else {
-          results.push({ username: player.username, success: false, error: 'Player not found on WOM' });
+          results.push({ username: player.username, success: false, error: 'Not found on WOM' });
         }
       } catch (e) {
         results.push({ username: player.username, success: false, error: e.message });
       }
-      // Rate limiting - wait between requests to avoid rate limits
+      
       await new Promise(resolve => setTimeout(resolve, 200));
     }
     
-    saveDB(db);
-    logActivity('WOM_SYNC', `Synkroniseret ${results.filter(r => r.success).length}/${results.length} spillere fra WOM`);
+    await logActivity('WOM_SYNC', `Synkroniseret ${results.filter(r => r.success).length}/${results.length} spillere fra WOM`);
     res.json(results);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Calculate and update tile progress from WOM data
 app.post('/api/sync/progress', async (req, res) => {
   try {
-    if (!db.config.event_start) {
+    const config = await getConfig();
+    if (!config.event_start) {
       return res.status(400).json({ error: 'Bingo event not started' });
     }
-
-    const results = [];
-    const skillTiles = db.tiles.filter(t => t.metric && t.type === 'skill');
-    const bossTiles = db.tiles.filter(t => t.metric && t.type === 'boss');
     
-    // Group players by team
-    const teamPlayers = {};
-    for (const player of db.players) {
-      if (!teamPlayers[player.team_id]) teamPlayers[player.team_id] = [];
-      teamPlayers[player.team_id].push(player);
-    }
-
-    // For each team, calculate progress on skill/boss tiles
-    for (const [teamId, players] of Object.entries(teamPlayers)) {
-      const teamProgress = {};
-      
-      for (const player of players) {
-        try {
-          // Fetch current stats from WOM
-          const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
-          if (!response.ok) continue;
-          
-          const data = await response.json();
-          const currentStats = data.latestSnapshot?.data;
-          if (!currentStats) continue;
-
-          // Store current stats on player
-          player.current_stats = currentStats;
-          
-          // Calculate XP gained for skill tiles
-          for (const tile of skillTiles) {
-            const metric = tile.metric;
-            const currentXP = currentStats.skills?.[metric]?.experience || 0;
-            const baselineXP = player.baseline_stats?.skills?.[metric]?.experience || 0;
-            const xpGained = Math.max(0, currentXP - baselineXP);
-            
-            if (!teamProgress[tile.id]) teamProgress[tile.id] = 0;
-            teamProgress[tile.id] += xpGained;
-          }
-
-          // Calculate KC gained for boss tiles
-          for (const tile of bossTiles) {
-            const metric = tile.metric;
-            const currentKC = currentStats.bosses?.[metric]?.kills || 0;
-            const baselineKC = player.baseline_stats?.bosses?.[metric]?.kills || 0;
-            const kcGained = Math.max(0, currentKC - baselineKC);
-            
-            if (!teamProgress[tile.id]) teamProgress[tile.id] = 0;
-            teamProgress[tile.id] += kcGained;
-          }
-
-          results.push({ player: player.username, team_id: parseInt(teamId), success: true });
-        } catch (e) {
-          results.push({ player: player.username, team_id: parseInt(teamId), success: false, error: e.message });
-        }
-        
-        // Rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-
-      // Update progress for this team
-      for (const [tileId, value] of Object.entries(teamProgress)) {
-        const tile = db.tiles.find(t => t.id === parseInt(tileId));
-        const existing = db.progress.find(p => p.tile_id === parseInt(tileId) && p.team_id === parseInt(teamId));
-        const completed = tile && value >= (tile.target_value || 1);
-        
-        if (existing) {
-          existing.current_value = value;
-          existing.completed = completed;
-          if (completed && !existing.completed_at) {
-            existing.completed_at = new Date().toISOString();
-          }
-        } else if (value > 0) {
-          db.progress.push({
-            id: db.nextIds.progress++,
-            tile_id: parseInt(tileId),
-            team_id: parseInt(teamId),
-            current_value: value,
-            completed,
-            completed_at: completed ? new Date().toISOString() : null
-          });
-        }
-      }
-    }
-
-    saveDB(db);
-    res.json({ success: true, results, message: `Synced ${results.filter(r => r.success).length} players` });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ SAVED BOARDS ============
-
-// Get all saved boards
-app.get('/api/boards', (req, res) => {
-  try {
-    if (!db.boards) db.boards = [];
-    res.json(db.boards.map(b => ({ id: b.id, name: b.name, created_at: b.created_at })));
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Save current board
-app.post('/api/boards', (req, res) => {
-  try {
-    const { name } = req.body;
-    if (!db.boards) db.boards = [];
-    if (!db.nextIds.board) db.nextIds.board = 1;
-    
-    const board = {
-      id: db.nextIds.board++,
-      name: name || `Board ${db.boards.length + 1}`,
-      tiles: JSON.parse(JSON.stringify(db.tiles)),
-      progress: JSON.parse(JSON.stringify(db.progress)),
-      created_at: new Date().toISOString()
-    };
-    db.boards.push(board);
-    saveDB(db);
-    res.status(201).json({ id: board.id, name: board.name });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Load a saved board
-app.post('/api/boards/:id/load', (req, res) => {
-  try {
-    const boardId = parseInt(req.params.id);
-    const board = db.boards?.find(b => b.id === boardId);
-    if (!board) {
-      return res.status(404).json({ error: 'Board not found' });
-    }
-    db.tiles = JSON.parse(JSON.stringify(board.tiles));
-    db.progress = JSON.parse(JSON.stringify(board.progress));
-    saveDB(db);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete a saved board
-app.delete('/api/boards/:id', (req, res) => {
-  try {
-    const boardId = parseInt(req.params.id);
-    if (db.boards) {
-      db.boards = db.boards.filter(b => b.id !== boardId);
-      saveDB(db);
-    }
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ PROOFS / CHAT ============
-
-// Get all proofs for a tile
-app.get('/api/tiles/:tileId/proofs', (req, res) => {
-  try {
-    const tileId = parseInt(req.params.tileId);
-    if (!db.proofs) db.proofs = [];
-    const proofs = db.proofs
-      .filter(p => p.tile_id === tileId)
-      .map(p => {
-        const team = db.teams.find(t => t.id === p.team_id);
-        return { ...p, team_name: team?.name, team_color: team?.color };
-      })
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    res.json(proofs);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get all proofs
-app.get('/api/proofs', (req, res) => {
-  try {
-    if (!db.proofs) db.proofs = [];
-    const proofs = db.proofs.map(p => {
-      const team = db.teams.find(t => t.id === p.team_id);
-      const tile = db.tiles.find(t => t.id === p.tile_id);
-      return { ...p, team_name: team?.name, team_color: team?.color, tile_name: tile?.name };
-    }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    res.json(proofs);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Submit a proof
-app.post('/api/proofs', (req, res) => {
-  try {
-    const { tile_id, team_id, image_url, message, player_name, count } = req.body;
-    if (!db.proofs) db.proofs = [];
-    if (!db.nextIds.proof) db.nextIds.proof = 1;
-    
-    const proof = {
-      id: db.nextIds.proof++,
-      tile_id,
-      team_id,
-      image_url: image_url || '',
-      message: message || '',
-      player_name: player_name || 'Unknown',
-      count: count || 1,
-      status: 'pending',
-      created_at: new Date().toISOString()
-    };
-    db.proofs.push(proof);
-    saveDB(db);
-    res.status(201).json(proof);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Admin: Approve/reject proof and assign tile
-app.put('/api/proofs/:id', (req, res) => {
-  try {
-    const proofId = parseInt(req.params.id);
-    const { status, admin_password } = req.body;
-    
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid admin password' });
-    }
-    
-    const proof = db.proofs?.find(p => p.id === proofId);
-    if (!proof) {
-      return res.status(404).json({ error: 'Proof not found' });
-    }
-    
-    proof.status = status;
-    
-    if (status === 'approved') {
-      const tile = db.tiles.find(t => t.id === proof.tile_id);
-      const isCollection = tile?.type === 'collection';
-      const countToAdd = proof.count || 1;
-      
-      const existing = db.progress.find(p => p.tile_id === proof.tile_id && p.team_id === proof.team_id);
-      
-      if (isCollection) {
-        // Collection type: add to counter
-        if (existing) {
-          existing.current_value = (existing.current_value || 0) + countToAdd;
-        } else {
-          db.progress.push({
-            id: db.nextIds.progress++,
-            tile_id: proof.tile_id,
-            team_id: proof.team_id,
-            current_value: countToAdd,
-            completed: false,
-            completed_at: null
-          });
-        }
-        
-        // Update who "owns" the tile based on highest count
-        const allProgress = db.progress.filter(p => p.tile_id === proof.tile_id);
-        const highest = allProgress.reduce((max, p) => p.current_value > max.current_value ? p : max, { current_value: 0 });
-        
-        // Mark the leader as "completed" (owns the tile)
-        allProgress.forEach(p => {
-          p.completed = (p.team_id === highest.team_id && highest.current_value > 0);
-          if (p.completed) p.completed_at = new Date().toISOString();
-        });
-      } else {
-        // Normal type: first to complete wins
-        if (existing) {
-          existing.current_value = (existing.current_value || 0) + countToAdd;
-          existing.completed = true;
-          existing.completed_at = new Date().toISOString();
-        } else {
-          db.progress.push({
-            id: db.nextIds.progress++,
-            tile_id: proof.tile_id,
-            team_id: proof.team_id,
-            current_value: countToAdd,
-            completed: true,
-            completed_at: new Date().toISOString()
-          });
-        }
-      }
-    }
-    
-    saveDB(db);
-    
-    const tile = db.tiles.find(t => t.id === proof.tile_id);
-    const team = db.teams.find(t => t.id === proof.team_id);
-    if (status === 'approved') {
-      logActivity('PROOF_APPROVED', `Bevis godkendt: "${tile?.name}" for "${team?.name}" af ${proof.player_name}`, 'Admin');
-    } else if (status === 'rejected') {
-      logActivity('PROOF_REJECTED', `Bevis afvist: "${tile?.name}" for "${team?.name}"`, 'Admin');
-    }
-    
-    res.json(proof);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete proof
-app.delete('/api/proofs/:id', (req, res) => {
-  try {
-    const proofId = parseInt(req.params.id);
-    if (db.proofs) {
-      db.proofs = db.proofs.filter(p => p.id !== proofId);
-      saveDB(db);
-    }
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ ADMIN ============
-
-// Verify admin password
-app.post('/api/admin/verify', (req, res) => {
-  try {
-    const { password } = req.body;
-    const isValid = password === db.config.admin_password;
-    res.json({ valid: isValid });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Verify site PIN (with lockout after 5 failed attempts)
-app.post('/api/verify-pin', (req, res) => {
-  try {
-    const { pin } = req.body;
-    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
-    
-    // Initialize failed attempts tracking
-    if (!db.failedPinAttempts) db.failedPinAttempts = {};
-    
-    // Check if locked out
-    const attempts = db.failedPinAttempts[clientIp] || { count: 0, locked: false };
-    if (attempts.locked) {
-      return res.json({ valid: false, locked: true, message: 'For mange forsøg. Kontakt admin.' });
-    }
-    
-    const isValid = pin === db.config.site_pin;
-    
-    if (isValid) {
-      // Reset attempts on success
-      delete db.failedPinAttempts[clientIp];
-      saveDB(db);
-      res.json({ valid: true });
-    } else {
-      // Increment failed attempts
-      attempts.count = (attempts.count || 0) + 1;
-      if (attempts.count >= 5) {
-        attempts.locked = true;
-        logActivity('PIN_LOCKOUT', `IP ${clientIp} låst efter 5 forkerte PIN forsøg`);
-      }
-      db.failedPinAttempts[clientIp] = attempts;
-      saveDB(db);
-      
-      const remaining = 5 - attempts.count;
-      res.json({ 
-        valid: false, 
-        locked: attempts.locked,
-        remaining: remaining > 0 ? remaining : 0,
-        message: attempts.locked ? 'For mange forsøg. Kontakt admin.' : `Forkert PIN. ${remaining} forsøg tilbage.`
-      });
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Reset PIN lockout (admin only)
-app.post('/api/admin/reset-lockout', (req, res) => {
-  try {
-    const { admin_password } = req.body;
-    
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid admin password' });
-    }
-    
-    db.failedPinAttempts = {};
-    saveDB(db);
-    logActivity('LOCKOUT_RESET', 'Alle PIN lockouts nulstillet', 'Admin');
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update site PIN (admin only)
-app.put('/api/admin/pin', (req, res) => {
-  try {
-    const { admin_password, new_pin } = req.body;
-    
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid admin password' });
-    }
-    
-    if (!new_pin || new_pin.length < 4) {
-      return res.status(400).json({ error: 'PIN skal være mindst 4 tegn' });
-    }
-    
-    db.config.site_pin = new_pin;
-    saveDB(db);
-    logActivity('PIN_CHANGED', 'Site PIN kode ændret', 'Admin');
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Admin: Manually assign tile to team
-app.post('/api/admin/assign-tile', (req, res) => {
-  try {
-    const { tile_id, team_id, admin_password } = req.body;
-    
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid admin password' });
-    }
-    
-    // Remove any existing completion for this tile
-    db.progress = db.progress.filter(p => !(p.tile_id === tile_id && p.completed));
-    
-    // Assign to new team
-    const existing = db.progress.find(p => p.tile_id === tile_id && p.team_id === team_id);
-    if (existing) {
-      existing.completed = true;
-      existing.completed_at = new Date().toISOString();
-    } else {
-      db.progress.push({
-        id: db.nextIds.progress++,
-        tile_id,
-        team_id,
-        current_value: 1,
-        completed: true,
-        completed_at: new Date().toISOString()
-      });
-    }
-    
-    saveDB(db);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Admin: Change password
-app.put('/api/admin/password', (req, res) => {
-  try {
-    const { old_password, new_password } = req.body;
-    
-    if (old_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid current password' });
-    }
-    
-    db.config.admin_password = new_password;
-    saveDB(db);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Admin: Adjust collection counter manually
-app.post('/api/admin/adjust-counter', (req, res) => {
-  try {
-    const { tile_id, team_id, adjustment, admin_password } = req.body;
-    
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid admin password' });
-    }
-    
-    const existing = db.progress.find(p => p.tile_id === tile_id && p.team_id === team_id);
-    
-    if (existing) {
-      existing.current_value = Math.max(0, (existing.current_value || 0) + adjustment);
-    } else {
-      db.progress.push({
-        id: db.nextIds.progress++,
-        tile_id,
-        team_id,
-        current_value: Math.max(0, adjustment),
-        completed: false,
-        completed_at: null
-      });
-    }
-    
-    // Recalculate leader for collection tiles
-    const tile = db.tiles.find(t => t.id === tile_id);
-    if (tile?.type === 'collection') {
-      const allProgress = db.progress.filter(p => p.tile_id === tile_id);
-      const highest = allProgress.reduce((max, p) => p.current_value > max.current_value ? p : max, { current_value: 0 });
-      
-      allProgress.forEach(p => {
-        p.completed = (p.team_id === highest.team_id && highest.current_value > 0);
-        if (p.completed) p.completed_at = new Date().toISOString();
-      });
-    }
-    
-    saveDB(db);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get rules
-app.get('/api/rules', (req, res) => {
-  try {
-    res.json({ rules: db.rules || '' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update rules (admin only)
-app.put('/api/rules', (req, res) => {
-  try {
-    const { rules, admin_password } = req.body;
-    
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid admin password' });
-    }
-    
-    db.rules = rules;
-    saveDB(db);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get approved proofs for live feed
-app.get('/api/proofs/approved', (req, res) => {
-  try {
-    if (!db.proofs) db.proofs = [];
-    const proofs = db.proofs
-      .filter(p => p.status === 'approved')
-      .map(p => {
-        const team = db.teams.find(t => t.id === p.team_id);
-        const tile = db.tiles.find(t => t.id === p.tile_id);
-        return { ...p, team_name: team?.name, team_color: team?.color, team_logo: team?.logo_url, tile_name: tile?.name, tile_image: tile?.image_url };
-      })
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-      .slice(0, 50); // Last 50 approved proofs
-    res.json(proofs);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get score history for graphs
-app.get('/api/history', (req, res) => {
-  try {
-    if (!db.history) db.history = [];
-    res.json(db.history);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Record score snapshot (called periodically or on changes)
-app.post('/api/history/snapshot', (req, res) => {
-  try {
-    if (!db.history) db.history = [];
-    
-    const snapshot = {
-      timestamp: new Date().toISOString(),
-      scores: db.teams.map(team => {
-        const teamProgress = db.progress.filter(p => p.team_id === team.id && p.completed);
-        const points = teamProgress.reduce((sum, p) => {
-          const tile = db.tiles.find(t => t.id === p.tile_id);
-          return sum + (tile?.points || 0);
-        }, 0);
-        return { team_id: team.id, team_name: team.name, team_color: team.color, points };
-      })
-    };
-    
-    db.history.push(snapshot);
-    // Keep last 1000 snapshots
-    if (db.history.length > 1000) db.history = db.history.slice(-1000);
-    saveDB(db);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get/Update event config (timer, etc.)
-app.get('/api/config', (req, res) => {
-  try {
-    res.json(db.config);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.put('/api/config', (req, res) => {
-  try {
-    const { admin_password, ...updates } = req.body;
-    
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid admin password' });
-    }
-    
-    db.config = { ...db.config, ...updates };
-    saveDB(db);
-    res.json(db.config);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Undo last action
-app.post('/api/admin/undo', (req, res) => {
-  try {
-    const { admin_password } = req.body;
-    
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid admin password' });
-    }
-    
-    if (!db.actionLog || db.actionLog.length === 0) {
-      return res.status(400).json({ error: 'No actions to undo' });
-    }
-    
-    const lastAction = db.actionLog.pop();
-    
-    // Restore previous state based on action type
-    if (lastAction.type === 'proof_approved') {
-      // Find and unapprove the proof
-      const proof = db.proofs.find(p => p.id === lastAction.proof_id);
-      if (proof) {
-        proof.status = 'pending';
-      }
-      // Remove the progress
-      const progressIdx = db.progress.findIndex(p => 
-        p.tile_id === lastAction.tile_id && p.team_id === lastAction.team_id
-      );
-      if (progressIdx !== -1) {
-        db.progress.splice(progressIdx, 1);
-      }
-    }
-    
-    saveDB(db);
-    res.json({ success: true, undone: lastAction });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Export data as JSON (can be converted to CSV on frontend)
-app.get('/api/export', (req, res) => {
-  try {
-    const exportData = {
-      teams: db.teams.map(t => ({
-        name: t.name,
-        color: t.color,
-        players: db.players.filter(p => p.team_id === t.id).map(p => p.username),
-        completed_tiles: db.progress.filter(p => p.team_id === t.id && p.completed).length,
-        total_points: db.progress
-          .filter(p => p.team_id === t.id && p.completed)
-          .reduce((sum, p) => {
-            const tile = db.tiles.find(ti => ti.id === p.tile_id);
-            return sum + (tile?.points || 0);
-          }, 0)
-      })),
-      tiles: db.tiles.map(t => ({
-        name: t.name,
-        type: t.type,
-        points: t.points,
-        completed_by: db.progress
-          .filter(p => p.tile_id === t.id && p.completed)
-          .map(p => db.teams.find(te => te.id === p.team_id)?.name)
-      })),
-      history: db.history,
-      event: {
-        name: db.config.name,
-        start: db.config.event_start,
-        end: db.config.event_end
-      }
-    };
-    res.json(exportData);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get achievements/badges
-app.get('/api/achievements', (req, res) => {
-  try {
-    const achievements = [];
-    
-    // First Blood - first team to complete any tile
-    const firstCompletion = db.progress
-      .filter(p => p.completed)
-      .sort((a, b) => new Date(a.completed_at || a.created_at) - new Date(b.completed_at || b.created_at))[0];
-    
-    if (firstCompletion) {
-      const team = db.teams.find(t => t.id === firstCompletion.team_id);
-      if (team) {
-        achievements.push({
-          id: 'first_blood',
-          name: 'First Blood',
-          description: 'Første hold til at fuldføre et felt',
-          team_id: team.id,
-          team_name: team.name,
-          team_color: team.color,
-          icon: '🩸'
-        });
-      }
-    }
-    
-    // Most Tiles - team with most completed tiles
-    const tileCounts = {};
-    db.progress.filter(p => p.completed).forEach(p => {
-      tileCounts[p.team_id] = (tileCounts[p.team_id] || 0) + 1;
-    });
-    
-    const mostTilesTeamId = Object.entries(tileCounts)
-      .sort((a, b) => b[1] - a[1])[0]?.[0];
-    
-    if (mostTilesTeamId) {
-      const team = db.teams.find(t => t.id === parseInt(mostTilesTeamId));
-      if (team) {
-        achievements.push({
-          id: 'most_tiles',
-          name: 'Tile Master',
-          description: `Flest fuldførte felter (${tileCounts[mostTilesTeamId]})`,
-          team_id: team.id,
-          team_name: team.name,
-          team_color: team.color,
-          icon: '🏆'
-        });
-      }
-    }
-    
-    // Speed Demon - fastest tile completion (if we have timing data)
-    // Point Leader - highest points
-    const pointCounts = {};
-    db.progress.filter(p => p.completed).forEach(p => {
-      const tile = db.tiles.find(t => t.id === p.tile_id);
-      pointCounts[p.team_id] = (pointCounts[p.team_id] || 0) + (tile?.points || 0);
-    });
-    
-    const topPointsTeamId = Object.entries(pointCounts)
-      .sort((a, b) => b[1] - a[1])[0]?.[0];
-    
-    if (topPointsTeamId) {
-      const team = db.teams.find(t => t.id === parseInt(topPointsTeamId));
-      if (team) {
-        achievements.push({
-          id: 'point_leader',
-          name: 'Point Leader',
-          description: `Højeste point total (${pointCounts[topPointsTeamId]})`,
-          team_id: team.id,
-          team_name: team.name,
-          team_color: team.color,
-          icon: '⭐'
-        });
-      }
-    }
-    
-    // Boss Slayer - most boss kills tiles
-    const bossKills = {};
-    db.progress.filter(p => p.completed).forEach(p => {
-      const tile = db.tiles.find(t => t.id === p.tile_id);
-      if (tile?.type === 'kills' || tile?.type === 'kc') {
-        bossKills[p.team_id] = (bossKills[p.team_id] || 0) + 1;
-      }
-    });
-    
-    const bossSlayerTeamId = Object.entries(bossKills)
-      .sort((a, b) => b[1] - a[1])[0]?.[0];
-    
-    if (bossSlayerTeamId && bossKills[bossSlayerTeamId] > 0) {
-      const team = db.teams.find(t => t.id === parseInt(bossSlayerTeamId));
-      if (team) {
-        achievements.push({
-          id: 'boss_slayer',
-          name: 'Boss Slayer',
-          description: `Flest boss kills (${bossKills[bossSlayerTeamId]})`,
-          team_id: team.id,
-          team_name: team.name,
-          team_color: team.color,
-          icon: '⚔️'
-        });
-      }
-    }
-    
-    res.json(achievements);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get MVP per team
-app.get('/api/mvp', (req, res) => {
-  try {
-    const mvps = [];
-    
-    db.teams.forEach(team => {
-      // Count proofs submitted and approved per player
-      const playerContributions = {};
-      
-      db.proofs
-        .filter(p => p.team_id === team.id && p.status === 'approved')
-        .forEach(p => {
-          playerContributions[p.player_name] = (playerContributions[p.player_name] || 0) + 1;
-        });
-      
-      const topPlayer = Object.entries(playerContributions)
-        .sort((a, b) => b[1] - a[1])[0];
-      
-      if (topPlayer) {
-        mvps.push({
-          team_id: team.id,
-          team_name: team.name,
-          team_color: team.color,
-          player_name: topPlayer[0],
-          contributions: topPlayer[1]
-        });
-      }
-    });
-    
-    res.json(mvps);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ CHAT ENDPOINTS ============
-
-// Get chat messages for a team
-app.get('/api/chat/:teamId', (req, res) => {
-  try {
-    const teamId = parseInt(req.params.teamId);
-    if (!db.chatMessages) db.chatMessages = [];
-    const messages = db.chatMessages
-      .filter(m => m.team_id === teamId)
-      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-      .slice(-100); // Last 100 messages
-    res.json(messages);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Post a chat message
-app.post('/api/chat', (req, res) => {
-  try {
-    const { team_id, player_name, message } = req.body;
-    if (!team_id || !player_name || !message) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-    if (!db.chatMessages) db.chatMessages = [];
-    if (!db.nextIds.chat) db.nextIds.chat = 1;
-    
-    const newMessage = {
-      id: db.nextIds.chat++,
-      team_id: parseInt(team_id),
-      player_name,
-      message: message.slice(0, 500), // Limit message length
-      timestamp: new Date().toISOString()
-    };
-    
-    db.chatMessages.push(newMessage);
-    // Keep only last 500 messages per team
-    const teamMessages = db.chatMessages.filter(m => m.team_id === parseInt(team_id));
-    if (teamMessages.length > 500) {
-      const toRemove = teamMessages.slice(0, teamMessages.length - 500);
-      db.chatMessages = db.chatMessages.filter(m => !toRemove.includes(m));
-    }
-    
-    saveDB(db);
-    res.json(newMessage);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ TILE VOTING ENDPOINTS ============
-
-// Get votes for all tiles
-app.get('/api/votes', (req, res) => {
-  try {
-    if (!db.tileVotes) db.tileVotes = {};
-    res.json(db.tileVotes);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get votes for a specific team
-app.get('/api/votes/:teamId', (req, res) => {
-  try {
-    const teamId = req.params.teamId;
-    if (!db.tileVotes) db.tileVotes = {};
-    const teamVotes = {};
-    
-    Object.entries(db.tileVotes).forEach(([tileId, votes]) => {
-      const teamTileVotes = votes.filter(v => v.team_id === parseInt(teamId));
-      if (teamTileVotes.length > 0) {
-        teamVotes[tileId] = teamTileVotes.length;
-      }
-    });
-    
-    res.json(teamVotes);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Vote for a tile
-app.post('/api/votes', (req, res) => {
-  try {
-    const { tile_id, team_id, player_name } = req.body;
-    if (!tile_id || !team_id || !player_name) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-    
-    if (!db.tileVotes) db.tileVotes = {};
-    if (!db.tileVotes[tile_id]) db.tileVotes[tile_id] = [];
-    
-    // Check if player already voted for this tile
-    const existingVote = db.tileVotes[tile_id].find(
-      v => v.team_id === parseInt(team_id) && v.player_name === player_name
-    );
-    
-    if (existingVote) {
-      // Remove vote (toggle)
-      db.tileVotes[tile_id] = db.tileVotes[tile_id].filter(
-        v => !(v.team_id === parseInt(team_id) && v.player_name === player_name)
-      );
-    } else {
-      // Add vote
-      db.tileVotes[tile_id].push({
-        team_id: parseInt(team_id),
-        player_name,
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    saveDB(db);
-    res.json({ success: true, votes: db.tileVotes[tile_id]?.length || 0 });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============ POT VALUE ENDPOINTS ============
-
-// Get pot value
-app.get('/api/pot', (req, res) => {
-  try {
-    res.json({
-      value: db.config.pot_value || 0,
-      donor: db.config.pot_donor || 'Anonym'
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update pot value (admin only)
-app.put('/api/pot', (req, res) => {
-  try {
-    const { admin_password, value, donor } = req.body;
-    if (admin_password !== db.config.admin_password) {
-      return res.status(401).json({ error: 'Invalid password' });
-    }
-    
-    if (value !== undefined) db.config.pot_value = parseInt(value);
-    if (donor !== undefined) db.config.pot_donor = donor;
-    
-    saveDB(db);
-    res.json({ success: true, value: db.config.pot_value, donor: db.config.pot_donor });
+    res.json({ success: true, message: 'Progress sync not yet implemented for Supabase' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1635,128 +781,127 @@ app.put('/api/pot', (req, res) => {
 
 // ============ BINGO EVENT ============
 
-// Get bingo status
-app.get('/api/bingo/status', (req, res) => {
-  try {
-    res.json({
-      started: !!db.config.event_start,
-      event_start: db.config.event_start,
-      event_end: db.config.event_end
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Start bingo event
 app.post('/api/bingo/start', async (req, res) => {
   try {
     const { admin_password, duration_hours = 168 } = req.body;
+    const config = await getConfig();
     
-    if (admin_password !== db.config.admin_password) {
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
       return res.status(403).json({ error: 'Invalid admin password' });
     }
     
     const now = new Date();
     const endTime = new Date(now.getTime() + duration_hours * 60 * 60 * 1000);
     
-    db.config.event_start = now.toISOString();
-    db.config.event_end = endTime.toISOString();
-    
-    // Fetch and save baseline stats for all players from WOM
-    const players = db.players || [];
-    const playerResults = [];
-    
-    for (const player of players) {
-      try {
-        // Fetch current stats from WOM
-        const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
-        if (response.ok) {
-          const data = await response.json();
-          const stats = data.latestSnapshot?.data;
-          if (stats) {
-            player.baseline_stats = stats;
-            player.current_stats = stats;
-            player.baseline_timestamp = now.toISOString();
-            playerResults.push({ username: player.username, success: true });
-          } else {
-            playerResults.push({ username: player.username, success: false, error: 'No stats found' });
-          }
-        } else {
-          playerResults.push({ username: player.username, success: false, error: 'Player not found on WOM' });
-        }
-        // Rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100));
-      } catch (err) {
-        playerResults.push({ username: player.username, success: false, error: err.message });
-      }
+    const { data: existing } = await supabase.from('config').select('id').limit(1);
+    if (existing && existing.length > 0) {
+      await supabase.from('config')
+        .update({ event_start: now.toISOString(), event_end: endTime.toISOString() })
+        .eq('id', existing[0].id);
     }
     
-    saveDB(db);
+    // Save baseline stats for all players
+    const { data: players } = await supabase.from('players').select('*');
+    for (const player of (players || [])) {
+      await supabase.from('players')
+        .update({ 
+          baseline_stats: player.current_stats,
+          baseline_timestamp: now.toISOString()
+        })
+        .eq('id', player.id);
+    }
+    
+    await logActivity('BINGO_STARTED', `Bingo event startet (${duration_hours} timer)`);
     
     res.json({ 
       success: true, 
-      event_start: db.config.event_start,
-      event_end: db.config.event_end,
-      players: playerResults
+      event_start: now.toISOString(),
+      event_end: endTime.toISOString()
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Reset bingo event
-app.post('/api/bingo/reset', (req, res) => {
+// ============ BOARDS ============
+
+app.get('/api/boards', async (req, res) => {
   try {
-    const { admin_password } = req.body;
-    
-    if (admin_password !== db.config.admin_password) {
-      return res.status(403).json({ error: 'Invalid admin password' });
-    }
-    
-    // Reset event times
-    db.config.event_start = null;
-    db.config.event_end = null;
-    
-    // Clear all progress
-    db.progress = [];
-    
-    // Clear player baselines
-    for (const player of db.players || []) {
-      player.baseline_stats = null;
-      player.baseline_timestamp = null;
-    }
-    
-    // Clear proofs
-    db.proofs = [];
-    
-    // Clear history
-    db.history = [];
-    db.actionLog = [];
-    
-    saveDB(db);
-    
-    res.json({ success: true, message: 'Bingo reset successfully' });
+    const { data: boards } = await supabase.from('boards').select('*');
+    res.json(boards || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Global error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ 
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
+app.post('/api/boards', async (req, res) => {
+  try {
+    const { name } = req.body;
+    const { data: tiles } = await supabase.from('tiles').select('*');
+    
+    const { data: board, error } = await supabase.from('boards')
+      .insert({ name, tiles })
+      .select()
+      .single();
+    
+    if (error) throw error;
+    res.json(board);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint not found' });
+app.post('/api/boards/:id/load', async (req, res) => {
+  try {
+    const boardId = parseInt(req.params.id);
+    const { data: board } = await supabase.from('boards').select('*').eq('id', boardId).single();
+    
+    if (!board) return res.status(404).json({ error: 'Board not found' });
+    
+    // Clear existing tiles
+    await supabase.from('tiles').delete().neq('id', 0);
+    
+    // Insert board tiles
+    if (board.tiles && board.tiles.length > 0) {
+      const tilesToInsert = board.tiles.map(t => ({
+        name: t.name,
+        description: t.description,
+        type: t.type,
+        metric: t.metric,
+        target_value: t.target_value,
+        points: t.points,
+        image_url: t.image_url,
+        position: t.position
+      }));
+      await supabase.from('tiles').insert(tilesToInsert);
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
+
+// ============ UNDO ============
+
+app.post('/api/admin/undo', async (req, res) => {
+  try {
+    const { admin_password } = req.body;
+    const config = await getConfig();
+    
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    // Undo not implemented for Supabase yet
+    res.json({ success: false, message: 'Undo not available with Supabase' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ START SERVER ============
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
