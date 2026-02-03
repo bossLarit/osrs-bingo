@@ -151,7 +151,7 @@ function TeamManager({ teams, onUpdate }) {
 
   const selectTeam = async (team) => {
     try {
-      const res = await fetch(`/api/teams/${team.id}`);
+      const res = await fetch(apiUrl(`/api/teams/${team.id}`));
       const fullTeam = await res.json();
       setSelectedTeam(fullTeam);
     } catch (error) {
@@ -502,21 +502,27 @@ function TeamManager({ teams, onUpdate }) {
                 </button>
               </div>
 
-              {/* Add from pool */}
-              {unassignedPlayers.length > 0 && (
+              {/* Add players to this team */}
+              {allPlayers.filter(p => p.team_id !== selectedTeam.id).length > 0 && (
                 <div className="mb-4">
-                  <h4 className="font-semibold text-osrs-brown text-sm mb-2">Tilføj fra pulje:</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {unassignedPlayers.map(player => (
-                      <button
-                        key={player.id}
-                        onClick={() => assignPlayerToTeam(player.id, selectedTeam.id)}
-                        className="flex items-center gap-1 bg-green-100 hover:bg-green-200 px-2 py-1 rounded text-sm transition-colors"
-                      >
-                        <UserPlus size={14} className="text-green-600" />
-                        <span className="text-osrs-brown">{player.username}</span>
-                      </button>
-                    ))}
+                  <h4 className="font-semibold text-osrs-brown text-sm mb-2">Tilføj spillere til holdet:</h4>
+                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                    {allPlayers.filter(p => p.team_id !== selectedTeam.id).map(player => {
+                      const currentTeam = (teams || []).find(t => t.id === player.team_id);
+                      return (
+                        <button
+                          key={player.id}
+                          onClick={() => assignPlayerToTeam(player.id, selectedTeam.id)}
+                          className="flex items-center gap-1 bg-green-100 hover:bg-green-200 px-2 py-1 rounded text-sm transition-colors"
+                        >
+                          <UserPlus size={14} className="text-green-600" />
+                          <span className="text-osrs-brown">{player.username}</span>
+                          {currentTeam && (
+                            <span className="text-xs text-gray-500">({currentTeam.name})</span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
