@@ -957,12 +957,64 @@ app.post('/api/admin/verify', (req, res) => {
   }
 });
 
-// Verify site PIN
+// Verify site PIN (with lockout after 5 failed attempts)
 app.post('/api/verify-pin', (req, res) => {
   try {
     const { pin } = req.body;
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+    
+    // Initialize failed attempts tracking
+    if (!db.failedPinAttempts) db.failedPinAttempts = {};
+    
+    // Check if locked out
+    const attempts = db.failedPinAttempts[clientIp] || { count: 0, locked: false };
+    if (attempts.locked) {
+      return res.json({ valid: false, locked: true, message: 'For mange forsøg. Kontakt admin.' });
+    }
+    
     const isValid = pin === db.config.site_pin;
-    res.json({ valid: isValid });
+    
+    if (isValid) {
+      // Reset attempts on success
+      delete db.failedPinAttempts[clientIp];
+      saveDB(db);
+      res.json({ valid: true });
+    } else {
+      // Increment failed attempts
+      attempts.count = (attempts.count || 0) + 1;
+      if (attempts.count >= 5) {
+        attempts.locked = true;
+        logActivity('PIN_LOCKOUT', `IP ${clientIp} låst efter 5 forkerte PIN forsøg`);
+      }
+      db.failedPinAttempts[clientIp] = attempts;
+      saveDB(db);
+      
+      const remaining = 5 - attempts.count;
+      res.json({ 
+        valid: false, 
+        locked: attempts.locked,
+        remaining: remaining > 0 ? remaining : 0,
+        message: attempts.locked ? 'For mange forsøg. Kontakt admin.' : `Forkert PIN. ${remaining} forsøg tilbage.`
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reset PIN lockout (admin only)
+app.post('/api/admin/reset-lockout', (req, res) => {
+  try {
+    const { admin_password } = req.body;
+    
+    if (admin_password !== db.config.admin_password) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    db.failedPinAttempts = {};
+    saveDB(db);
+    logActivity('LOCKOUT_RESET', 'Alle PIN lockouts nulstillet', 'Admin');
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

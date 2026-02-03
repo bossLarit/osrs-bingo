@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, UserPlus, ChevronRight, Loader2, Lock } from 'lucide-react';
+import { User, UserPlus, ChevronRight, Loader2, Lock, Shield } from 'lucide-react';
 import { apiUrl } from '../api';
 
 function WelcomeModal({ teams, onPlayerSelect, onClose }) {
@@ -13,6 +13,13 @@ function WelcomeModal({ teams, onPlayerSelect, onClose }) {
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
   const [verifyingPin, setVerifyingPin] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const [remainingAttempts, setRemainingAttempts] = useState(5);
+  
+  // Admin login
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminError, setAdminError] = useState('');
   
   // Registration form
   const [newUsername, setNewUsername] = useState('');
@@ -46,10 +53,44 @@ function WelcomeModal({ teams, onPlayerSelect, onClose }) {
         setStep('select');
         fetchPlayers();
       } else {
-        setPinError('Forkert PIN kode');
+        setPinError(data.message || 'Forkert PIN kode');
+        if (data.locked) {
+          setIsLocked(true);
+        }
+        if (data.remaining !== undefined) {
+          setRemainingAttempts(data.remaining);
+        }
       }
     } catch (error) {
       setPinError('Kunne ikke verificere PIN');
+    } finally {
+      setVerifyingPin(false);
+    }
+  };
+
+  const verifyAdmin = async (e) => {
+    e.preventDefault();
+    setAdminError('');
+    setVerifyingPin(true);
+    
+    try {
+      const res = await fetch(apiUrl('/api/admin/verify'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: adminPassword })
+      });
+      const data = await res.json();
+      
+      if (data.valid) {
+        localStorage.setItem('pinVerified', 'true');
+        localStorage.setItem('adminPassword', adminPassword);
+        setStep('select');
+        fetchPlayers();
+      } else {
+        setAdminError('Forkert admin password');
+      }
+    } catch (error) {
+      setAdminError('Kunne ikke verificere');
     } finally {
       setVerifyingPin(false);
     }
@@ -126,51 +167,129 @@ function WelcomeModal({ teams, onPlayerSelect, onClose }) {
       <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[300] p-4">
         <div className="bg-[#f5e6c8] border-4 border-[#5c4a32] rounded-lg shadow-2xl max-w-sm w-full overflow-hidden">
           <div className="bg-gradient-to-r from-amber-700 to-amber-600 p-4 text-center">
-            <Lock size={32} className="mx-auto text-white mb-2" />
-            <h2 className="text-2xl font-bold text-white mb-1">🎲 OSRS Bingo</h2>
-            <p className="text-amber-100 text-sm">Indtast PIN kode for at fortsætte</p>
-          </div>
-
-          <form onSubmit={verifyPin} className="p-6">
-            <input
-              type="password"
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              placeholder="PIN kode..."
-              className="w-full px-4 py-3 border-2 border-osrs-border rounded-lg bg-white focus:outline-none focus:border-amber-600 text-center text-xl tracking-widest"
-              autoFocus
-            />
-            
-            {pinError && (
-              <div className="mt-3 bg-red-100 border border-red-300 text-red-700 px-3 py-2 rounded-lg text-sm text-center">
-                {pinError}
-              </div>
+            {showAdminLogin ? (
+              <Shield size={32} className="mx-auto text-white mb-2" />
+            ) : (
+              <Lock size={32} className="mx-auto text-white mb-2" />
             )}
-
-            <button
-              type="submit"
-              disabled={verifyingPin || !pin}
-              className="w-full mt-4 bg-amber-600 hover:bg-amber-700 text-white py-3 rounded-lg font-bold disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {verifyingPin ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" />
-                  Verificerer...
-                </>
-              ) : (
-                <>
-                  <Lock size={18} />
-                  Fortsæt
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="px-6 pb-4 text-center">
-            <p className="text-xs text-osrs-border">
-              Kontakt administratoren for at få PIN koden
+            <h2 className="text-2xl font-bold text-white mb-1">🎲 OSRS Bingo</h2>
+            <p className="text-amber-100 text-sm">
+              {showAdminLogin ? 'Admin login' : 'Indtast PIN kode for at fortsætte'}
             </p>
           </div>
+
+          {isLocked ? (
+            <div className="p-6 text-center">
+              <div className="bg-red-100 border-2 border-red-300 text-red-700 px-4 py-6 rounded-lg">
+                <Lock size={32} className="mx-auto mb-2" />
+                <p className="font-bold mb-2">Adgang låst!</p>
+                <p className="text-sm">For mange forkerte forsøg.</p>
+                <p className="text-sm mt-2">Kontakt admin for at nulstille.</p>
+              </div>
+              <button
+                onClick={() => setShowAdminLogin(true)}
+                className="mt-4 text-amber-700 hover:text-amber-800 text-sm underline"
+              >
+                Admin login
+              </button>
+            </div>
+          ) : showAdminLogin ? (
+            <form onSubmit={verifyAdmin} className="p-6">
+              <input
+                type="password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                placeholder="Admin password..."
+                className="w-full px-4 py-3 border-2 border-osrs-border rounded-lg bg-white focus:outline-none focus:border-amber-600 text-center"
+                autoFocus
+              />
+              
+              {adminError && (
+                <div className="mt-3 bg-red-100 border border-red-300 text-red-700 px-3 py-2 rounded-lg text-sm text-center">
+                  {adminError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={verifyingPin || !adminPassword}
+                className="w-full mt-4 bg-amber-600 hover:bg-amber-700 text-white py-3 rounded-lg font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {verifyingPin ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Verificerer...
+                  </>
+                ) : (
+                  <>
+                    <Shield size={18} />
+                    Log ind som Admin
+                  </>
+                )}
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAdminLogin(false);
+                  setAdminError('');
+                }}
+                className="w-full mt-2 text-osrs-border hover:text-osrs-brown text-sm"
+              >
+                ← Tilbage til PIN
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={verifyPin} className="p-6">
+              <input
+                type="password"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                placeholder="PIN kode..."
+                className="w-full px-4 py-3 border-2 border-osrs-border rounded-lg bg-white focus:outline-none focus:border-amber-600 text-center text-xl tracking-widest"
+                autoFocus
+              />
+              
+              {pinError && (
+                <div className="mt-3 bg-red-100 border border-red-300 text-red-700 px-3 py-2 rounded-lg text-sm text-center">
+                  {pinError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={verifyingPin || !pin}
+                className="w-full mt-4 bg-amber-600 hover:bg-amber-700 text-white py-3 rounded-lg font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {verifyingPin ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Verificerer...
+                  </>
+                ) : (
+                  <>
+                    <Lock size={18} />
+                    Fortsæt
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {!isLocked && !showAdminLogin && (
+            <div className="px-6 pb-4 text-center space-y-2">
+              <p className="text-xs text-osrs-border">
+                Kontakt administratoren for at få PIN koden
+              </p>
+              <button
+                onClick={() => setShowAdminLogin(true)}
+                className="text-amber-700 hover:text-amber-800 text-xs underline flex items-center gap-1 mx-auto"
+              >
+                <Shield size={12} />
+                Admin login
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
