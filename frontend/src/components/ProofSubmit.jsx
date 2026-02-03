@@ -30,9 +30,10 @@ function ProofSubmit({ tiles = [], teams = [], onUpdate }) {
     try {
       const res = await fetch(apiUrl('/api/proofs'));
       const data = await res.json();
-      setProofs(data);
+      setProofs(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching proofs:', error);
+      setProofs([]);
     }
   };
 

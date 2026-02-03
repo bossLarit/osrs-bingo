@@ -22,9 +22,10 @@ function TeamSelector({ teams = [], selectedTeamId, onSelect, players, onPlayerS
     try {
       const res = await fetch(apiUrl('/api/players'));
       const data = await res.json();
-      setAllPlayers(data);
+      setAllPlayers(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching players:', error);
+      setAllPlayers([]);
     }
   };
 

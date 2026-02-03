@@ -28,9 +28,10 @@ function TeamChat({ teams }) {
     try {
       const res = await fetch(apiUrl(`/api/chat/${selectedTeam.id}`));
       const data = await res.json();
-      setMessages(data);
+      setMessages(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching messages:', error);
+      setMessages([]);
     }
   };
 

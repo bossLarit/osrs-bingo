@@ -39,9 +39,10 @@ function ActivityLog({ adminPassword }) {
     try {
       const res = await fetch(apiUrl('/api/admin/logs?limit=100'));
       const data = await res.json();
-      setLogs(data);
+      setLogs(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching logs:', error);
+      setLogs([]);
     } finally {
       setLoading(false);
     }
