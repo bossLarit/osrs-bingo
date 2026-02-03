@@ -1082,8 +1082,36 @@ app.post('/api/admin/undo', async (req, res) => {
       return res.status(403).json({ error: 'Invalid admin password' });
     }
     
-    // Undo not implemented for Supabase yet
-    res.json({ success: false, message: 'Undo not available with Supabase' });
+    // Find last approved proof
+    const { data: lastApproved } = await supabase
+      .from('proofs')
+      .select('*')
+      .eq('status', 'approved')
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    
+    if (!lastApproved || lastApproved.length === 0) {
+      return res.json({ success: false, message: 'Ingen godkendelser at fortryde' });
+    }
+    
+    const proof = lastApproved[0];
+    
+    // Revert the proof status to pending
+    await supabase
+      .from('proofs')
+      .update({ status: 'pending', updated_at: new Date().toISOString() })
+      .eq('id', proof.id);
+    
+    // Remove the progress entry if it exists
+    await supabase
+      .from('progress')
+      .delete()
+      .eq('tile_id', proof.tile_id)
+      .eq('team_id', proof.team_id);
+    
+    await logActivity('UNDO', `Fortrudt godkendelse: ${proof.tile_name || 'Felt'} for ${proof.team_name || 'Hold'}`);
+    
+    res.json({ success: true, message: 'Godkendelse fortrudt' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
