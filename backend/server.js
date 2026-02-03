@@ -26,6 +26,7 @@ const defaultData = {
     grid_size: 7, 
     active: true, 
     admin_password: process.env.ADMIN_PASSWORD || 'changeme',
+    site_pin: process.env.SITE_PIN || '1234',
     event_start: null,
     event_end: null,
     sounds_enabled: true,
@@ -951,6 +952,39 @@ app.post('/api/admin/verify', (req, res) => {
     const { password } = req.body;
     const isValid = password === db.config.admin_password;
     res.json({ valid: isValid });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Verify site PIN
+app.post('/api/verify-pin', (req, res) => {
+  try {
+    const { pin } = req.body;
+    const isValid = pin === db.config.site_pin;
+    res.json({ valid: isValid });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update site PIN (admin only)
+app.put('/api/admin/pin', (req, res) => {
+  try {
+    const { admin_password, new_pin } = req.body;
+    
+    if (admin_password !== db.config.admin_password) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    if (!new_pin || new_pin.length < 4) {
+      return res.status(400).json({ error: 'PIN skal være mindst 4 tegn' });
+    }
+    
+    db.config.site_pin = new_pin;
+    saveDB(db);
+    logActivity('PIN_CHANGED', 'Site PIN kode ændret', 'Admin');
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

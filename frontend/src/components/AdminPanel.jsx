@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, Check, X, Image, MessageSquare, Users, Crown, Undo2, Clock, Calendar } from 'lucide-react';
+import { Shield, Check, X, Image, MessageSquare, Users, Crown, Undo2, Clock, Calendar, Lock, Key } from 'lucide-react';
 import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
 import ActivityLog from './ActivityLog';
@@ -18,6 +18,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
   const [showScheduler, setShowScheduler] = useState(false);
   const [eventStart, setEventStart] = useState('');
   const [eventEnd, setEventEnd] = useState('');
+  const [newPin, setNewPin] = useState('');
 
   useEffect(() => {
     const saved = localStorage.getItem('adminPassword');
@@ -131,6 +132,34 @@ function AdminPanel({ teams, tiles, onUpdate }) {
     setIsAdmin(false);
     setStoredPassword('');
     localStorage.removeItem('adminPassword');
+  };
+
+  const updatePin = async () => {
+    if (!newPin || newPin.length < 4) {
+      await dialog.error('PIN skal være mindst 4 tegn');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl('/api/admin/pin'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_password: storedPassword, new_pin: newPin })
+      });
+      
+      if (res.ok) {
+        await dialog.success('PIN kode opdateret!');
+        setNewPin('');
+      } else {
+        const data = await res.json();
+        await dialog.error(data.error || 'Kunne ikke opdatere PIN');
+      }
+    } catch (error) {
+      console.error('Error updating PIN:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchProofs = async () => {
@@ -264,6 +293,34 @@ function AdminPanel({ teams, tiles, onUpdate }) {
           </button>
           <button onClick={logout} className="btn-osrs rounded text-sm">
             Log ud
+          </button>
+        </div>
+      </div>
+
+      {/* PIN Management */}
+      <div className="mb-8 p-4 bg-white bg-opacity-30 rounded-lg">
+        <h3 className="font-semibold text-osrs-brown mb-3 flex items-center gap-2">
+          <Key size={18} />
+          Site PIN Kode
+        </h3>
+        <p className="text-sm text-osrs-border mb-3">
+          PIN koden kræves for at tilgå hjemmesiden. Del den kun med deltagere.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newPin}
+            onChange={(e) => setNewPin(e.target.value)}
+            placeholder="Ny PIN kode (min 4 tegn)..."
+            className="input-osrs flex-1 rounded"
+          />
+          <button
+            onClick={updatePin}
+            disabled={loading || !newPin || newPin.length < 4}
+            className="btn-osrs rounded flex items-center gap-2"
+          >
+            <Lock size={16} />
+            Opdater PIN
           </button>
         </div>
       </div>

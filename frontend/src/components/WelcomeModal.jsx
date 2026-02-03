@@ -1,21 +1,59 @@
 import { useState, useEffect } from 'react';
-import { User, UserPlus, ChevronRight, Loader2 } from 'lucide-react';
+import { User, UserPlus, ChevronRight, Loader2, Lock } from 'lucide-react';
 import { apiUrl } from '../api';
 
 function WelcomeModal({ teams, onPlayerSelect, onClose }) {
+  const [step, setStep] = useState('pin'); // 'pin' or 'select'
   const [mode, setMode] = useState('select'); // 'select' or 'register'
   const [allPlayers, setAllPlayers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [registering, setRegistering] = useState(false);
+  
+  // PIN verification
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [verifyingPin, setVerifyingPin] = useState(false);
   
   // Registration form
   const [newUsername, setNewUsername] = useState('');
   const [selectedTeamId, setSelectedTeamId] = useState('');
   const [error, setError] = useState('');
 
+  // Check if already verified
   useEffect(() => {
-    fetchPlayers();
+    const verified = localStorage.getItem('pinVerified');
+    if (verified === 'true') {
+      setStep('select');
+      fetchPlayers();
+    }
   }, []);
+
+  const verifyPin = async (e) => {
+    e.preventDefault();
+    setPinError('');
+    setVerifyingPin(true);
+    
+    try {
+      const res = await fetch(apiUrl('/api/verify-pin'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+      const data = await res.json();
+      
+      if (data.valid) {
+        localStorage.setItem('pinVerified', 'true');
+        setStep('select');
+        fetchPlayers();
+      } else {
+        setPinError('Forkert PIN kode');
+      }
+    } catch (error) {
+      setPinError('Kunne ikke verificere PIN');
+    } finally {
+      setVerifyingPin(false);
+    }
+  };
 
   const fetchPlayers = async () => {
     try {
@@ -81,6 +119,62 @@ function WelcomeModal({ teams, onPlayerSelect, onClose }) {
       setRegistering(false);
     }
   };
+
+  // PIN verification step
+  if (step === 'pin') {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[300] p-4">
+        <div className="bg-[#f5e6c8] border-4 border-[#5c4a32] rounded-lg shadow-2xl max-w-sm w-full overflow-hidden">
+          <div className="bg-gradient-to-r from-amber-700 to-amber-600 p-4 text-center">
+            <Lock size={32} className="mx-auto text-white mb-2" />
+            <h2 className="text-2xl font-bold text-white mb-1">🎲 OSRS Bingo</h2>
+            <p className="text-amber-100 text-sm">Indtast PIN kode for at fortsætte</p>
+          </div>
+
+          <form onSubmit={verifyPin} className="p-6">
+            <input
+              type="password"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              placeholder="PIN kode..."
+              className="w-full px-4 py-3 border-2 border-osrs-border rounded-lg bg-white focus:outline-none focus:border-amber-600 text-center text-xl tracking-widest"
+              autoFocus
+            />
+            
+            {pinError && (
+              <div className="mt-3 bg-red-100 border border-red-300 text-red-700 px-3 py-2 rounded-lg text-sm text-center">
+                {pinError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={verifyingPin || !pin}
+              className="w-full mt-4 bg-amber-600 hover:bg-amber-700 text-white py-3 rounded-lg font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {verifyingPin ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  Verificerer...
+                </>
+              ) : (
+                <>
+                  <Lock size={18} />
+                  Fortsæt
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="px-6 pb-4 text-center">
+            <p className="text-xs text-osrs-border">
+              Kontakt administratoren for at få PIN koden
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[300] p-4">
