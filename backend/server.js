@@ -1115,6 +1115,39 @@ app.post('/api/bingo/reset', async (req, res) => {
   }
 });
 
+// Update baseline stats from current stats (for fixing missing baselines)
+app.post('/api/bingo/update-baseline', async (req, res) => {
+  try {
+    const { admin_password } = req.body;
+    const config = await getConfig();
+    
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    const { data: players } = await supabase.from('players').select('*');
+    const now = new Date().toISOString();
+    let updated = 0;
+    
+    for (const player of (players || [])) {
+      if (player.current_stats && !player.baseline_stats) {
+        await supabase.from('players')
+          .update({ 
+            baseline_stats: player.current_stats,
+            baseline_timestamp: now
+          })
+          .eq('id', player.id);
+        updated++;
+      }
+    }
+    
+    await logActivity('BASELINE_UPDATE', `Opdateret baseline for ${updated} spillere`);
+    res.json({ success: true, updated });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ RULES ============
 
 app.get('/api/rules', async (req, res) => {
