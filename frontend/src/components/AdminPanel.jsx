@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Shield, Check, X, Image, MessageSquare, Users, Crown, Undo2, Clock, Calendar } from 'lucide-react';
 import { apiUrl } from '../api';
+import { useDialog } from './Dialog';
 
 function AdminPanel({ teams, tiles, onUpdate }) {
+  const dialog = useDialog();
   const [isAdmin, setIsAdmin] = useState(false);
   const [password, setPassword] = useState('');
   const [storedPassword, setStoredPassword] = useState('');
@@ -43,7 +45,13 @@ function AdminPanel({ teams, tiles, onUpdate }) {
   };
 
   const handleUndo = async () => {
-    if (!confirm('Fortryd sidste godkendelse?')) return;
+    const confirmed = await dialog.confirm('Er du sikker på du vil fortryde sidste godkendelse?', {
+      title: 'Fortryd handling',
+      confirmText: 'Ja, fortryd',
+      cancelText: 'Annuller'
+    });
+    if (!confirmed) return;
+    
     setLoading(true);
     try {
       const res = await fetch(apiUrl('/api/admin/undo'), {
@@ -53,14 +61,15 @@ function AdminPanel({ teams, tiles, onUpdate }) {
       });
       const data = await res.json();
       if (data.success) {
-        alert('Handling fortrudt!');
+        await dialog.success('Handlingen blev fortrudt!');
         fetchProofs();
         onUpdate();
       } else {
-        alert(data.error || 'Kunne ikke fortryde');
+        await dialog.error(data.error || 'Kunne ikke fortryde handlingen');
       }
     } catch (error) {
       console.error('Error undoing:', error);
+      await dialog.error('Der opstod en fejl. Prøv igen.');
     } finally {
       setLoading(false);
     }
@@ -79,7 +88,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
         })
       });
       setShowScheduler(false);
-      alert('Event tider gemt!');
+      await dialog.success('Event tider blev gemt!');
     } catch (error) {
       console.error('Error saving schedule:', error);
     } finally {
@@ -151,7 +160,12 @@ function AdminPanel({ teams, tiles, onUpdate }) {
   };
 
   const deleteProof = async (proofId) => {
-    if (!confirm('Slet dette bevis?')) return;
+    const confirmed = await dialog.confirm('Er du sikker på du vil slette dette bevis?', {
+      title: 'Slet bevis',
+      confirmText: 'Ja, slet',
+      variant: 'error'
+    });
+    if (!confirmed) return;
     try {
       await fetch(apiUrl(`/api/proofs/${proofId}`), { method: 'DELETE' });
       fetchProofs();
