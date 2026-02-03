@@ -485,8 +485,30 @@ app.put('/api/proofs/:id', async (req, res) => {
 
 app.delete('/api/proofs/:id', async (req, res) => {
   try {
+    const { admin_password } = req.body;
+    const config = await getConfig();
+    
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
     const proofId = parseInt(req.params.id);
+    
+    // Get proof details before deleting for logging
+    const { data: proof } = await supabase.from('proofs').select('*').eq('id', proofId).single();
+    
     await supabase.from('proofs').delete().eq('id', proofId);
+    
+    // Also remove progress if it was approved
+    if (proof && proof.status === 'approved') {
+      await supabase.from('progress')
+        .delete()
+        .eq('tile_id', proof.tile_id)
+        .eq('team_id', proof.team_id);
+    }
+    
+    await logActivity('DELETE_PROOF', `Slettet bevis: ${proof?.tile_name || 'Ukendt'} fra ${proof?.team_name || 'Ukendt'}`);
+    
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });

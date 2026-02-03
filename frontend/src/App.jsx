@@ -39,6 +39,18 @@ function App() {
     const saved = localStorage.getItem('myPlayer');
     return !saved;
   });
+  const [isAdmin, setIsAdmin] = useState(() => !!localStorage.getItem('adminPassword'));
+  
+  // Listen for admin login changes
+  useEffect(() => {
+    const checkAdmin = () => setIsAdmin(!!localStorage.getItem('adminPassword'));
+    window.addEventListener('storage', checkAdmin);
+    const interval = setInterval(checkAdmin, 1000);
+    return () => {
+      window.removeEventListener('storage', checkAdmin);
+      clearInterval(interval);
+    };
+  }, []);
 
   const handleTeamSelect = (teamId) => {
     setSelectedTeamId(teamId);
@@ -328,7 +340,7 @@ function App() {
                   onRefresh={fetchData}
                   selectedTeamId={selectedTeamId}
                 />
-                <LiveFeed />
+                <LiveFeed isAdmin={isAdmin} />
               </>
             )}
             {activeTab === 'teams' && (

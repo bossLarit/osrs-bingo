@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Image, RefreshCw } from 'lucide-react';
+import { Image, RefreshCw, Trash2 } from 'lucide-react';
 import { apiUrl } from '../api';
+import { useDialog } from './Dialog';
 
-function LiveFeed() {
+function LiveFeed({ isAdmin = false }) {
+  const dialog = useDialog();
   const [proofs, setProofs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(null);
@@ -24,6 +26,43 @@ function LiveFeed() {
       setProofs([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const deleteProof = async (proofId, e) => {
+    e.stopPropagation();
+    
+    const confirmed = await dialog.confirm('Er du sikker på du vil slette dette bevis?', {
+      title: 'Slet Bevis',
+      confirmText: 'Ja, slet',
+      cancelText: 'Annuller'
+    });
+    if (!confirmed) return;
+
+    const adminPassword = localStorage.getItem('adminPassword');
+    if (!adminPassword) {
+      await dialog.alert('Du skal være logget ind som admin', { variant: 'error' });
+      return;
+    }
+
+    try {
+      const res = await fetch(apiUrl(`/api/proofs/${proofId}`), {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_password: adminPassword })
+      });
+      
+      if (res.ok) {
+        await dialog.success('Bevis slettet!');
+        fetchApprovedProofs();
+        setSelectedImage(null);
+      } else {
+        const data = await res.json();
+        await dialog.alert(data.error || 'Kunne ikke slette bevis', { variant: 'error' });
+      }
+    } catch (error) {
+      console.error('Error deleting proof:', error);
+      await dialog.alert('Fejl ved sletning af bevis', { variant: 'error' });
     }
   };
 
@@ -93,6 +132,17 @@ function LiveFeed() {
               <div className="absolute top-1 right-1 bg-osrs-gold text-osrs-brown text-xs font-bold px-1.5 py-0.5 rounded">
                 +{proof.count}
               </div>
+            )}
+
+            {/* Admin delete button */}
+            {isAdmin && (
+              <button
+                onClick={(e) => deleteProof(proof.id, e)}
+                className="absolute top-1 left-1 bg-red-500 text-white p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                title="Slet bevis"
+              >
+                <Trash2 size={12} />
+              </button>
             )}
           </div>
         ))}
@@ -170,6 +220,17 @@ function LiveFeed() {
             >
               ✕
             </button>
+
+            {/* Admin delete button in lightbox */}
+            {isAdmin && (
+              <button
+                onClick={(e) => deleteProof(selectedImage.id, e)}
+                className="absolute top-4 left-4 bg-red-500 text-white px-3 py-2 rounded flex items-center gap-2 hover:bg-red-600"
+              >
+                <Trash2 size={16} />
+                Slet Bevis
+              </button>
+            )}
           </div>
         </div>
       )}
