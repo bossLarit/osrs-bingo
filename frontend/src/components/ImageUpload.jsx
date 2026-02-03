@@ -20,7 +20,8 @@ function ImageUpload({ onImageUrl, currentUrl }) {
       formData.append('image', file);
       
       // Using imgbb free API endpoint
-      const response = await fetch('https://api.imgbb.com/1/upload?key=d36eb6591370ae7f9089d85875e56b22', {
+      const imgbbKey = import.meta.env.VITE_IMGBB_KEY || 'd36eb6591370ae7f9089d85875e56b22';
+      const response = await fetch(`https://api.imgbb.com/1/upload?key=${imgbbKey}`, {
         method: 'POST',
         body: formData
       });

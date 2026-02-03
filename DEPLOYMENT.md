@@ -61,7 +61,7 @@ Replace `YOUR_USERNAME` with your GitHub username.
 2. Click **Add Environment Variable**
 3. Add:
    - **Key**: `ADMIN_PASSWORD`
-   - **Value**: `Chri99d1` (or your password)
+   - **Value**: Your secure admin password
 4. Click **Create Web Service**
 
 ### Step 6: Get Your Backend URL
@@ -115,12 +115,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          
+          node-version: "20"
+
       - name: Install and Build
         run: |
           cd frontend
@@ -128,7 +128,7 @@ jobs:
           npm run build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-          
+
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
@@ -174,21 +174,24 @@ The GitHub Action will automatically build and deploy!
 ## Troubleshooting
 
 ### "API not working"
+
 - Check that VITE_API_URL is set correctly in GitHub secrets
 - Check Render logs for errors
 
 ### "CORS error"
+
 The backend already has CORS enabled. If issues persist, check the Render URL is correct.
 
 ### "Free tier sleeping"
+
 Render free tier sleeps after 15 min of inactivity. First request after sleep takes ~30 seconds.
 
 ---
 
 ## Quick Reference
 
-| Service | URL | Dashboard |
-|---------|-----|-----------|
+| Service  | URL                  | Dashboard                    |
+| -------- | -------------------- | ---------------------------- |
 | Frontend | github.io/osrs-bingo | GitHub repo Settings → Pages |
-| Backend | onrender.com | render.com dashboard |
-| Logs | - | Render dashboard → Logs |
+| Backend  | onrender.com         | render.com dashboard         |
+| Logs     | -                    | Render dashboard → Logs      |
