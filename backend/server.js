@@ -318,6 +318,32 @@ app.delete('/api/tiles/:id', async (req, res) => {
   }
 });
 
+// Bulk create tiles
+app.post('/api/tiles/bulk', async (req, res) => {
+  try {
+    const { tiles } = req.body;
+    if (!tiles || !Array.isArray(tiles)) {
+      return res.status(400).json({ error: 'Tiles array required' });
+    }
+    
+    const { data, error } = await supabase.from('tiles').insert(tiles).select();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete all tiles
+app.delete('/api/tiles/all', async (req, res) => {
+  try {
+    await supabase.from('tiles').delete().neq('id', 0);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============ PROGRESS ROUTES ============
 
 app.get('/api/progress', async (req, res) => {
@@ -1040,6 +1066,128 @@ app.get('/api/bingo/status', async (req, res) => {
       event_start: config.event_start,
       event_end: config.event_end
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/bingo/reset', async (req, res) => {
+  try {
+    const { admin_password } = req.body;
+    const config = await getConfig();
+    
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    // Clear event times
+    const { data: existing } = await supabase.from('config').select('id').limit(1);
+    if (existing && existing.length > 0) {
+      await supabase.from('config')
+        .update({ event_start: null, event_end: null })
+        .eq('id', existing[0].id);
+    }
+    
+    // Clear all progress
+    await supabase.from('progress').delete().neq('id', 0);
+    
+    // Clear baseline stats
+    await supabase.from('players').update({ baseline_stats: null, baseline_timestamp: null }).neq('id', 0);
+    
+    await logActivity('BINGO_RESET', 'Bingo event nulstillet', 'Admin');
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ RULES ============
+
+app.get('/api/rules', async (req, res) => {
+  try {
+    const config = await getConfig();
+    res.json({ rules: config.rules || '' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/rules', async (req, res) => {
+  try {
+    const { rules, admin_password } = req.body;
+    const config = await getConfig();
+    
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    const { data: existing } = await supabase.from('config').select('id').limit(1);
+    if (existing && existing.length > 0) {
+      await supabase.from('config').update({ rules }).eq('id', existing[0].id);
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ CHAT ============
+
+app.get('/api/chat/:teamId', async (req, res) => {
+  try {
+    const teamId = parseInt(req.params.teamId);
+    const { data: messages } = await supabase.from('chat_messages')
+      .select('*')
+      .eq('team_id', teamId)
+      .order('created_at', { ascending: true })
+      .limit(100);
+    res.json(messages || []);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { team_id, player_name, message } = req.body;
+    
+    const { data: msg, error } = await supabase.from('chat_messages')
+      .insert({ team_id, player_name, message })
+      .select()
+      .single();
+    
+    if (error) throw error;
+    res.json(msg);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ HISTORY & STATS ============
+
+app.get('/api/history', async (req, res) => {
+  try {
+    // Return empty for now - can be implemented later
+    res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/achievements', async (req, res) => {
+  try {
+    // Return empty for now - can be implemented later
+    res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/mvp', async (req, res) => {
+  try {
+    // Return empty for now - can be implemented later
+    res.json({ player: null, team: null });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
