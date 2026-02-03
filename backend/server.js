@@ -60,6 +60,12 @@ function saveDB(data) {
 
 let db = loadDB();
 
+// Override admin password with environment variable
+if (process.env.ADMIN_PASSWORD) {
+  db.config.admin_password = process.env.ADMIN_PASSWORD;
+  console.log('Admin password loaded from environment variable');
+}
+
 // ============ TEAM ROUTES ============
 
 // Get all teams
