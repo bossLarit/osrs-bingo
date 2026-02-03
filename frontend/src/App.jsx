@@ -15,6 +15,7 @@ import TeamChat from './components/TeamChat';
 import PotDisplay from './components/PotDisplay';
 import BingoTimer from './components/BingoTimer';
 import TeamSelector from './components/TeamSelector';
+import WelcomeModal from './components/WelcomeModal';
 import { apiUrl } from './api';
 
 function App() {
@@ -34,6 +35,10 @@ function App() {
     const saved = localStorage.getItem('myPlayer');
     return saved ? JSON.parse(saved) : null;
   });
+  const [showWelcome, setShowWelcome] = useState(() => {
+    const saved = localStorage.getItem('myPlayer');
+    return !saved;
+  });
 
   const handleTeamSelect = (teamId) => {
     setSelectedTeamId(teamId);
@@ -48,9 +53,16 @@ function App() {
     setSelectedPlayer(player);
     if (player) {
       localStorage.setItem('myPlayer', JSON.stringify(player));
+      setShowWelcome(false);
     } else {
       localStorage.removeItem('myPlayer');
     }
+  };
+
+  const handleWelcomeSelect = (player, teamId) => {
+    handlePlayerSelect(player);
+    handleTeamSelect(teamId);
+    setShowWelcome(false);
   };
   
   // Fireworks state
@@ -365,6 +377,15 @@ function App() {
         teamName={fireworksState.teamName}
         message={fireworksState.message}
       />
+
+      {/* Welcome Modal */}
+      {showWelcome && !loading && teams.length > 0 && (
+        <WelcomeModal
+          teams={teams}
+          onPlayerSelect={handleWelcomeSelect}
+          onClose={() => setShowWelcome(false)}
+        />
+      )}
     </div>
   );
 }
