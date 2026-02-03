@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { Send, MessageSquare, Clock, Check, X } from 'lucide-react';
 import ImageUpload from './ImageUpload';
 import { apiUrl } from '../api';
+import { useDialog } from './Dialog';
 
 function ProofSubmit({ tiles, teams, onUpdate }) {
+  const dialog = useDialog();
   const [proofs, setProofs] = useState([]);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [formData, setFormData] = useState({
@@ -33,7 +35,7 @@ function ProofSubmit({ tiles, teams, onUpdate }) {
   const submitProof = async (e) => {
     e.preventDefault();
     if (!formData.tile_id || !formData.team_id) {
-      alert('Vælg venligst et felt og et hold');
+      await dialog.alert('Vælg venligst et felt og et hold', { title: 'Manglende information' });
       return;
     }
     
@@ -62,7 +64,7 @@ function ProofSubmit({ tiles, teams, onUpdate }) {
       });
       setShowSubmitModal(false);
       fetchProofs();
-      alert('Bevis indsendt! Admin vil gennemgå det.');
+      await dialog.success('Bevis indsendt! Admin vil gennemgå det.');
     } catch (error) {
       console.error('Error submitting proof:', error);
     } finally {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Trash2, Edit2, Save, X, Upload, Download, RefreshCw } from 'lucide-react';
 import { apiUrl } from '../api';
+import { useDialog } from './Dialog';
 
 const TILE_TYPES = [
   { value: 'kills', label: 'Boss Kills' },
@@ -171,6 +172,7 @@ function TileManager({ tiles, teams, onUpdate }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingTile, setEditingTile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const dialog = useDialog();
   const [showProgressModal, setShowProgressModal] = useState(null);
   const [showSkillSelector, setShowSkillSelector] = useState(false);
   const [showPetSelector, setShowPetSelector] = useState(false);
@@ -226,7 +228,12 @@ function TileManager({ tiles, teams, onUpdate }) {
   };
 
   const deleteTile = async (tileId) => {
-    if (!confirm('Er du sikker på at du vil slette dette felt?')) return;
+    const confirmed = await dialog.confirm('Er du sikker på at du vil slette dette felt?', {
+      title: 'Slet felt',
+      confirmText: 'Ja, slet',
+      variant: 'error'
+    });
+    if (!confirmed) return;
     
     try {
       await fetch(`/api/tiles/${tileId}`, { method: 'DELETE' });
@@ -308,7 +315,11 @@ function TileManager({ tiles, teams, onUpdate }) {
   };
 
   const generateAllBosses = async () => {
-    if (!confirm('Dette vil tilføje ALLE OSRS bosser som bingo-felter. Fortsæt?')) return;
+    const confirmed = await dialog.confirm('Dette vil tilføje ALLE OSRS bosser som bingo-felter. Fortsæt?', {
+      title: 'Tilføj alle bosser',
+      confirmText: 'Ja, tilføj'
+    });
+    if (!confirmed) return;
     
     setLoading(true);
     const bossTiles = ALL_BOSSES.map((boss, index) => ({
@@ -337,8 +348,19 @@ function TileManager({ tiles, teams, onUpdate }) {
   };
 
   const deleteAllTiles = async () => {
-    if (!confirm('Er du HELT sikker på at du vil slette ALLE felter? Dette kan ikke fortrydes!')) return;
-    if (!confirm('Sidste advarsel: Alle felter og fremskridt vil blive slettet permanent!')) return;
+    const firstConfirm = await dialog.confirm('Er du HELT sikker på at du vil slette ALLE felter? Dette kan ikke fortrydes!', {
+      title: 'Slet alle felter',
+      confirmText: 'Ja, slet alt',
+      variant: 'error'
+    });
+    if (!firstConfirm) return;
+    
+    const secondConfirm = await dialog.confirm('Sidste advarsel: Alle felter og fremskridt vil blive slettet permanent!', {
+      title: 'Bekræft sletning',
+      confirmText: 'Ja, jeg er sikker',
+      variant: 'error'
+    });
+    if (!secondConfirm) return;
     
     setLoading(true);
     try {
@@ -352,7 +374,10 @@ function TileManager({ tiles, teams, onUpdate }) {
   };
 
   const saveBoard = async () => {
-    const name = prompt('Giv dette board et navn:');
+    const name = await dialog.prompt('Giv dette board et navn:', {
+      title: 'Gem board',
+      placeholder: 'Board navn...'
+    });
     if (!name) return;
     
     try {
@@ -362,7 +387,7 @@ function TileManager({ tiles, teams, onUpdate }) {
         body: JSON.stringify({ name })
       });
       if (res.ok) {
-        alert('Board gemt!');
+        await dialog.success('Board gemt!');
       }
     } catch (error) {
       console.error('Error saving board:', error);
@@ -374,18 +399,20 @@ function TileManager({ tiles, teams, onUpdate }) {
       const res = await fetch(apiUrl('/api/boards'));
       const boards = await res.json();
       if (boards.length === 0) {
-        alert('Ingen gemte boards fundet');
+        await dialog.alert('Ingen gemte boards fundet');
         return;
       }
       const boardNames = boards.map((b, i) => `${i + 1}. ${b.name}`).join('\n');
-      const choice = prompt(`Vælg et board (indtast nummer):\n${boardNames}`);
+      const choice = await dialog.prompt(`Vælg et board (indtast nummer):\n${boardNames}`, {
+        title: 'Indlæs board'
+      });
       if (!choice) return;
       
       const index = parseInt(choice) - 1;
       if (index >= 0 && index < boards.length) {
         await fetch(`/api/boards/${boards[index].id}/load`, { method: 'POST' });
         onUpdate();
-        alert('Board indlæst!');
+        await dialog.success('Board indlæst!');
       }
     } catch (error) {
       console.error('Error loading board:', error);

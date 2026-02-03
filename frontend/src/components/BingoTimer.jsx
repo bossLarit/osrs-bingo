@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Clock, Play, RotateCcw } from 'lucide-react';
 import { apiUrl } from '../api';
+import { useDialog } from './Dialog';
 
 function BingoTimer({ onBingoStart }) {
+  const dialog = useDialog();
   const [status, setStatus] = useState({ started: false, event_start: null, event_end: null });
   const [timeLeft, setTimeLeft] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -60,26 +62,34 @@ function BingoTimer({ onBingoStart }) {
       });
       const data = await res.json();
       if (data.success) {
-        alert(`Bingo startet! Baseline gemt for ${data.players.filter(p => p.success).length} spillere`);
+        await dialog.success(`Bingo startet! Baseline gemt for ${data.players.filter(p => p.success).length} spillere`);
         setShowStartModal(false);
         setPassword('');
         fetchStatus();
         onBingoStart?.();
       } else {
-        alert(data.error || 'Kunne ikke starte bingo');
+        await dialog.error(data.error || 'Kunne ikke starte bingo');
       }
     } catch (error) {
       console.error('Error starting bingo:', error);
-      alert('Fejl ved start af bingo');
+      await dialog.error('Fejl ved start af bingo');
     } finally {
       setLoading(false);
     }
   };
 
   const resetBingo = async () => {
-    if (!confirm('Er du sikker på at du vil nulstille bingoen? Alt progress slettes!')) return;
+    const confirmed = await dialog.confirm('Er du sikker på at du vil nulstille bingoen? Alt progress slettes!', {
+      title: 'Nulstil Bingo',
+      confirmText: 'Ja, nulstil',
+      variant: 'error'
+    });
+    if (!confirmed) return;
     
-    const pwd = prompt('Indtast admin password:');
+    const pwd = await dialog.prompt('Indtast admin password:', {
+      title: 'Bekræft med password',
+      inputType: 'password'
+    });
     if (!pwd) return;
 
     try {
@@ -90,10 +100,10 @@ function BingoTimer({ onBingoStart }) {
       });
       const data = await res.json();
       if (data.success) {
-        alert('Bingo nulstillet!');
+        await dialog.success('Bingo blev nulstillet!');
         fetchStatus();
       } else {
-        alert(data.error || 'Kunne ikke nulstille');
+        await dialog.error(data.error || 'Kunne ikke nulstille');
       }
     } catch (error) {
       console.error('Error resetting bingo:', error);

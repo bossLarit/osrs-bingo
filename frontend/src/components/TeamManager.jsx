@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Plus, Trash2, UserPlus, X, Shuffle, Users, Scale } from 'lucide-react';
 import ImageUpload from './ImageUpload';
 import { apiUrl } from '../api';
+import { useDialog } from './Dialog';
 
 function TeamManager({ teams, onUpdate }) {
+  const dialog = useDialog();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRandomModal, setShowRandomModal] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState(null);
@@ -55,7 +57,12 @@ function TeamManager({ teams, onUpdate }) {
   };
 
   const deleteTeam = async (teamId) => {
-    if (!confirm('Er du sikker på at du vil slette dette hold?')) return;
+    const confirmed = await dialog.confirm('Er du sikker på at du vil slette dette hold?', {
+      title: 'Slet hold',
+      confirmText: 'Ja, slet',
+      variant: 'error'
+    });
+    if (!confirmed) return;
     
     try {
       await fetch(`/api/teams/${teamId}`, { method: 'DELETE' });
@@ -158,11 +165,15 @@ function TeamManager({ teams, onUpdate }) {
 
   const distributeRandomly = async () => {
     if (memberPool.length === 0 || teams.length === 0) {
-      alert('Du skal have både medlemmer i puljen og hold oprettet');
+      await dialog.alert('Du skal have både medlemmer i puljen og hold oprettet');
       return;
     }
 
-    if (!confirm(`Fordel ${memberPool.length} medlemmer tilfældigt på ${teams.length} hold?`)) return;
+    const confirmed = await dialog.confirm(`Fordel ${memberPool.length} medlemmer tilfældigt på ${teams.length} hold?`, {
+      title: 'Tilfældig fordeling',
+      confirmText: 'Ja, fordel'
+    });
+    if (!confirmed) return;
 
     setLoading(true);
     try {
@@ -182,7 +193,7 @@ function TeamManager({ teams, onUpdate }) {
       setMemberPool([]);
       setShowRandomModal(false);
       onUpdate();
-      alert('Medlemmer fordelt tilfældigt!');
+      await dialog.success('Medlemmer fordelt tilfældigt!');
     } catch (error) {
       console.error('Error distributing members:', error);
     } finally {
@@ -250,11 +261,15 @@ function TeamManager({ teams, onUpdate }) {
 
   const distributeBalanced = async () => {
     if (balancedPlayers.length === 0 || teams.length === 0) {
-      alert('Du skal have både spillere og hold');
+      await dialog.alert('Du skal have både spillere og hold');
       return;
     }
 
-    if (!confirm(`Fordel ${balancedPlayers.length} spillere balanceret på ${teams.length} hold baseret på ${getBalanceLabel()}?`)) return;
+    const balanceConfirmed = await dialog.confirm(`Fordel ${balancedPlayers.length} spillere balanceret på ${teams.length} hold baseret på ${getBalanceLabel()}?`, {
+      title: 'Balanceret fordeling',
+      confirmText: 'Ja, fordel'
+    });
+    if (!balanceConfirmed) return;
 
     setLoading(true);
     try {
@@ -290,7 +305,7 @@ function TeamManager({ teams, onUpdate }) {
         `${ts.team.name}: ${ts.players.length} spillere (${balanceBy}: ${ts.score.toFixed(1)})`
       ).join('\n');
       
-      alert('Spillere fordelt balanceret!\n\n' + results);
+      await dialog.success(`Spillere fordelt balanceret!\n\n${results}`);
       
       setBalancedPlayers([]);
       setShowBalancedModal(false);
