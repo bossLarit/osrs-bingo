@@ -1,8 +1,10 @@
 import { useState, useMemo, useEffect } from 'react';
 import BingoTile from './BingoTile';
 import { apiUrl } from '../api';
+import { useDialog } from './Dialog';
 
 function BingoBoard({ tiles, teams, progress, onRefresh }) {
+  const dialog = useDialog();
   const [hoveredTile, setHoveredTile] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [votes, setVotes] = useState({});
@@ -27,18 +29,37 @@ function BingoBoard({ tiles, teams, progress, onRefresh }) {
   };
 
   const handleVote = async (tileId) => {
-    if (!playerName || !selectedTeamId) {
-      const name = prompt('Indtast dit spillernavn:');
-      if (name) {
-        setPlayerName(name);
-        localStorage.setItem('chatPlayerName', name);
-      } else return;
-      
-      const teamId = prompt('Indtast dit hold ID (1, 2, 3, etc.):');
-      if (teamId) {
-        setSelectedTeamId(parseInt(teamId));
-        localStorage.setItem('selectedTeamId', teamId);
-      } else return;
+    let currentPlayerName = playerName;
+    let currentTeamId = selectedTeamId;
+
+    if (!currentPlayerName) {
+      const name = await dialog.prompt('Indtast dit spillernavn:', {
+        title: 'Stem på Tile',
+        placeholder: 'Dit OSRS navn...'
+      });
+      if (!name) return;
+      currentPlayerName = name;
+      setPlayerName(name);
+      localStorage.setItem('chatPlayerName', name);
+    }
+    
+    if (!currentTeamId) {
+      // Show team selection
+      const teamList = teams.map((t, i) => `${i + 1}. ${t.name}`).join('\n');
+      const choice = await dialog.prompt(`Vælg dit hold (indtast nummer):\n${teamList}`, {
+        title: 'Vælg Hold',
+        placeholder: '1, 2, 3...'
+      });
+      if (!choice) return;
+      const index = parseInt(choice) - 1;
+      if (index >= 0 && index < teams.length) {
+        currentTeamId = teams[index].id;
+        setSelectedTeamId(currentTeamId);
+        localStorage.setItem('selectedTeamId', currentTeamId.toString());
+      } else {
+        await dialog.error('Ugyldigt holdnummer');
+        return;
+      }
     }
 
     try {
@@ -47,8 +68,8 @@ function BingoBoard({ tiles, teams, progress, onRefresh }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tile_id: tileId,
-          team_id: selectedTeamId,
-          player_name: playerName
+          team_id: currentTeamId,
+          player_name: currentPlayerName
         })
       });
       fetchVotes();
