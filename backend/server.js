@@ -1071,6 +1071,7 @@ app.get('/api/bingo/status', async (req, res) => {
     const config = await getConfig();
     res.json({
       active: !!config.event_start,
+      started: !!config.event_start,
       event_start: config.event_start,
       event_end: config.event_end
     });
