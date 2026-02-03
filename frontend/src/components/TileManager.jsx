@@ -236,7 +236,7 @@ function TileManager({ tiles, teams, onUpdate }) {
     if (!confirmed) return;
     
     try {
-      await fetch(`/api/tiles/${tileId}`, { method: 'DELETE' });
+      await fetch(apiUrl(`/api/tiles/${tileId}`), { method: 'DELETE' });
       onUpdate();
     } catch (error) {
       console.error('Error deleting tile:', error);
@@ -410,7 +410,7 @@ function TileManager({ tiles, teams, onUpdate }) {
       
       const index = parseInt(choice) - 1;
       if (index >= 0 && index < boards.length) {
-        await fetch(`/api/boards/${boards[index].id}/load`, { method: 'POST' });
+        await fetch(apiUrl(`/api/boards/${boards[index].id}/load`), { method: 'POST' });
         onUpdate();
         await dialog.success('Board indlæst!');
       }

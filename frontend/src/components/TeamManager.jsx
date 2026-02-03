@@ -96,7 +96,7 @@ function TeamManager({ teams, onUpdate }) {
     
     setLoading(true);
     try {
-      await fetch(`/api/teams/${selectedTeam.id}/players`, {
+      await fetch(apiUrl(`/api/teams/${selectedTeam.id}/players`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: newPlayerName })
@@ -104,7 +104,7 @@ function TeamManager({ teams, onUpdate }) {
       setNewPlayerName('');
       
       // Refresh team data
-      const res = await fetch(`/api/teams/${selectedTeam.id}`);
+      const res = await fetch(apiUrl(`/api/teams/${selectedTeam.id}`));
       const updatedTeam = await res.json();
       setSelectedTeam(updatedTeam);
       onUpdate();
@@ -117,10 +117,10 @@ function TeamManager({ teams, onUpdate }) {
 
   const removePlayer = async (playerId) => {
     try {
-      await fetch(`/api/players/${playerId}`, { method: 'DELETE' });
+      await fetch(apiUrl(`/api/players/${playerId}`), { method: 'DELETE' });
       
       // Refresh team data
-      const res = await fetch(`/api/teams/${selectedTeam.id}`);
+      const res = await fetch(apiUrl(`/api/teams/${selectedTeam.id}`));
       const updatedTeam = await res.json();
       setSelectedTeam(updatedTeam);
       onUpdate();
@@ -133,14 +133,14 @@ function TeamManager({ teams, onUpdate }) {
     if (!selectedTeam) return;
     
     try {
-      await fetch(`/api/teams/${selectedTeam.id}`, {
+      await fetch(apiUrl(`/api/teams/${selectedTeam.id}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ logo_url: logoUrl })
       });
       
       // Refresh team data
-      const res = await fetch(`/api/teams/${selectedTeam.id}`);
+      const res = await fetch(apiUrl(`/api/teams/${selectedTeam.id}`));
       const updatedTeam = await res.json();
       setSelectedTeam(updatedTeam);
       onUpdate();
