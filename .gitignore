@@ -24,3 +24,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Test documents (local only)
+TEST_PLAN.md
+test-results/
