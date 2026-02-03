@@ -21,10 +21,15 @@ function Stats({ teams, tiles, progress }) {
         fetch(apiUrl('/api/config'))
       ]);
       
-      setHistory(await historyRes.json());
-      setAchievements(await achievementsRes.json());
-      setMvps(await mvpRes.json());
-      setConfig(await configRes.json());
+      const historyData = await historyRes.json();
+      const achievementsData = await achievementsRes.json();
+      const mvpData = await mvpRes.json();
+      const configData = await configRes.json();
+      
+      setHistory(Array.isArray(historyData) ? historyData : []);
+      setAchievements(Array.isArray(achievementsData) ? achievementsData : []);
+      setMvps(Array.isArray(mvpData) ? mvpData : []);
+      setConfig(configData || {});
     } catch (error) {
       console.error('Error fetching stats:', error);
     }
