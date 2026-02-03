@@ -1301,6 +1301,101 @@ app.put('/api/pot', (req, res) => {
   }
 });
 
+// ============ BINGO EVENT ============
+
+// Get bingo status
+app.get('/api/bingo/status', (req, res) => {
+  try {
+    res.json({
+      started: !!db.config.event_start,
+      event_start: db.config.event_start,
+      event_end: db.config.event_end
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Start bingo event
+app.post('/api/bingo/start', async (req, res) => {
+  try {
+    const { admin_password, duration_hours = 168 } = req.body;
+    
+    if (admin_password !== db.config.admin_password) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    const now = new Date();
+    const endTime = new Date(now.getTime() + duration_hours * 60 * 60 * 1000);
+    
+    db.config.event_start = now.toISOString();
+    db.config.event_end = endTime.toISOString();
+    
+    // Save baseline stats for all players
+    const players = db.players || [];
+    const playerResults = [];
+    
+    for (const player of players) {
+      try {
+        // Store current stats as baseline
+        player.baseline_stats = player.current_stats || {};
+        player.baseline_timestamp = now.toISOString();
+        playerResults.push({ username: player.username, success: true });
+      } catch (err) {
+        playerResults.push({ username: player.username, success: false, error: err.message });
+      }
+    }
+    
+    saveDB(db);
+    
+    res.json({ 
+      success: true, 
+      event_start: db.config.event_start,
+      event_end: db.config.event_end,
+      players: playerResults
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reset bingo event
+app.post('/api/bingo/reset', (req, res) => {
+  try {
+    const { admin_password } = req.body;
+    
+    if (admin_password !== db.config.admin_password) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    
+    // Reset event times
+    db.config.event_start = null;
+    db.config.event_end = null;
+    
+    // Clear all progress
+    db.progress = [];
+    
+    // Clear player baselines
+    for (const player of db.players || []) {
+      player.baseline_stats = null;
+      player.baseline_timestamp = null;
+    }
+    
+    // Clear proofs
+    db.proofs = [];
+    
+    // Clear history
+    db.history = [];
+    db.actionLog = [];
+    
+    saveDB(db);
+    
+    res.json({ success: true, message: 'Bingo reset successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Global error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
