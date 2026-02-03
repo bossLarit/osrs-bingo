@@ -124,8 +124,8 @@ function BingoTimer({ onBingoStart }) {
         </button>
 
         {showStartModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowStartModal(false)}>
-            <div className="bg-osrs-light border-4 border-osrs-border rounded-lg p-6 max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[90] p-4" onClick={() => setShowStartModal(false)}>
+            <div className="bg-[#f5e6c8] border-4 border-[#5c4a32] rounded-lg p-6 max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
               <h3 className="text-xl font-bold text-osrs-brown mb-4 flex items-center gap-2">
                 <Play size={20} />
                 Start Bingo Event

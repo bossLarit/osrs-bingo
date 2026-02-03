@@ -124,12 +124,13 @@ function DialogModal({ type, title, message, confirmText, cancelText, variant, o
 
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100] p-4"
+      className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[200] p-4"
       onClick={handleCancel}
     >
       <div 
-        className="bg-osrs-light border-4 border-osrs-border rounded-lg shadow-2xl max-w-md w-full animate-fade-in"
+        className="bg-[#f5e6c8] border-4 border-[#5c4a32] rounded-lg shadow-2xl max-w-md w-full transform scale-100"
         onClick={e => e.stopPropagation()}
+        style={{ animation: 'fadeIn 0.15s ease-out' }}
       >
         {/* Header */}
         <div className="flex items-center gap-3 p-4 border-b-2 border-osrs-border">
