@@ -829,16 +829,21 @@ app.post('/api/sync/progress', async (req, res) => {
         for (const player of teamPlayers) {
           const current = player.current_stats;
           const baseline = player.baseline_stats;
+          
+          // Debug logging
+          console.log(`Player ${player.username}: current_stats exists: ${!!current}, baseline_stats exists: ${!!baseline}`);
+          
           if (!current || !baseline) continue;
           
           let gain = 0;
           const metric = tile.metric?.toLowerCase();
           
-          if (tile.type === 'xp' || tile.type === 'level') {
+          if (tile.type === 'xp' || tile.type === 'level' || tile.type === 'experience') {
             // Skill XP gain
             const currentXp = current?.skills?.[metric]?.experience || 0;
             const baselineXp = baseline?.skills?.[metric]?.experience || 0;
             gain = currentXp - baselineXp;
+            console.log(`  ${metric} XP: current=${currentXp}, baseline=${baselineXp}, gain=${gain}`);
           } else if (tile.type === 'kills' || tile.type === 'kc') {
             // Boss KC gain
             const currentKc = current?.bosses?.[metric]?.kills || 0;
