@@ -10,7 +10,7 @@ function TeamManager({ teams, onUpdate }) {
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamColor, setNewTeamColor] = useState('#3b82f6');
-  const [newTeamCaptain, setNewTeamCaptain] = useState('');
+  const [newTeamLogo, setNewTeamLogo] = useState('');
   const [newPlayerName, setNewPlayerName] = useState('');
   const [loading, setLoading] = useState(false);
   const [distributing, setDistributing] = useState(false);
