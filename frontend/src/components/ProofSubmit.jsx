@@ -4,7 +4,11 @@ import ImageUpload from './ImageUpload';
 import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
 
-function ProofSubmit({ tiles, teams, onUpdate }) {
+function ProofSubmit({ tiles = [], teams = [], onUpdate }) {
+  // Ensure arrays
+  const safeTiles = Array.isArray(tiles) ? tiles : [];
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  
   const dialog = useDialog();
   const [proofs, setProofs] = useState([]);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
@@ -194,7 +198,7 @@ function ProofSubmit({ tiles, teams, onUpdate }) {
                     required
                   >
                     <option value="">Vælg felt...</option>
-                    {tiles.map(tile => (
+                    {safeTiles.map(tile => (
                       <option key={tile.id} value={tile.id}>{tile.name}</option>
                     ))}
                   </select>
@@ -208,7 +212,7 @@ function ProofSubmit({ tiles, teams, onUpdate }) {
                     required
                   >
                     <option value="">Vælg hold...</option>
-                    {teams.map(team => (
+                    {safeTeams.map(team => (
                       <option key={team.id} value={team.id}>{team.name}</option>
                     ))}
                   </select>

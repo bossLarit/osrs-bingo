@@ -2,13 +2,16 @@ import { useState, useEffect } from 'react';
 import { User, ChevronDown, Check, LogOut } from 'lucide-react';
 import { apiUrl } from '../api';
 
-function TeamSelector({ teams, selectedTeamId, onSelect, players, onPlayerSelect, selectedPlayer }) {
+function TeamSelector({ teams = [], selectedTeamId, onSelect, players, onPlayerSelect, selectedPlayer }) {
+  // Ensure arrays
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  
   const [isOpen, setIsOpen] = useState(false);
   const [allPlayers, setAllPlayers] = useState([]);
   
   // Find the team for the selected player
   const playerTeam = selectedPlayer 
-    ? teams.find(t => t.id === selectedPlayer.team_id)
+    ? safeTeams.find(t => t.id === selectedPlayer.team_id)
     : null;
 
   useEffect(() => {
@@ -98,7 +101,7 @@ function TeamSelector({ teams, selectedTeamId, onSelect, players, onPlayerSelect
             </div>
           ) : (
             <div className="max-h-64 overflow-y-auto">
-              {teams.map(team => {
+              {safeTeams.map(team => {
                 const teamPlayers = playersByTeam[team.id] || [];
                 if (teamPlayers.length === 0) return null;
                 

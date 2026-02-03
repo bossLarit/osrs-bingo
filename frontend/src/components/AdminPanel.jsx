@@ -4,7 +4,11 @@ import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
 import ActivityLog from './ActivityLog';
 
-function AdminPanel({ teams, tiles, onUpdate }) {
+function AdminPanel({ teams = [], tiles = [], onUpdate }) {
+  // Ensure arrays
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  const safeTiles = Array.isArray(tiles) ? tiles : [];
+  
   const dialog = useDialog();
   const [isAdmin, setIsAdmin] = useState(false);
   const [password, setPassword] = useState('');
@@ -335,7 +339,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
           Klik på et felt for at tildele det til et hold manuelt
         </p>
         <div className="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 max-h-64 overflow-y-auto">
-          {tiles.map(tile => (
+          {safeTiles.map(tile => (
             <button
               key={tile.id}
               onClick={() => setShowAssignModal(tile)}
@@ -479,7 +483,7 @@ function AdminPanel({ teams, tiles, onUpdate }) {
               className="input-osrs w-full rounded mb-4"
             >
               <option value="">Vælg hold...</option>
-              {teams.map(team => (
+              {safeTeams.map(team => (
                 <option key={team.id} value={team.id}>{team.name}</option>
               ))}
             </select>
