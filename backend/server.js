@@ -773,7 +773,98 @@ app.post('/api/sync/progress', async (req, res) => {
       return res.status(400).json({ error: 'Bingo event not started' });
     }
     
-    res.json({ success: true, message: 'Progress sync not yet implemented for Supabase' });
+    const { data: tiles } = await supabase.from('tiles').select('*');
+    const { data: teams } = await supabase.from('teams').select('*');
+    const { data: players } = await supabase.from('players').select('*');
+    
+    const results = [];
+    
+    for (const tile of (tiles || [])) {
+      // Skip custom tiles (no automatic tracking)
+      if (tile.type === 'custom') continue;
+      
+      const isCompetition = tile.target_value === 0 || tile.target_value === null;
+      const teamProgress = {};
+      
+      // Calculate progress for each team based on their players
+      for (const team of (teams || [])) {
+        const teamPlayers = (players || []).filter(p => p.team_id === team.id);
+        let teamTotal = 0;
+        
+        for (const player of teamPlayers) {
+          const current = player.current_stats;
+          const baseline = player.baseline_stats;
+          if (!current || !baseline) continue;
+          
+          let gain = 0;
+          const metric = tile.metric?.toLowerCase();
+          
+          if (tile.type === 'xp' || tile.type === 'level') {
+            // Skill XP gain
+            const currentXp = current?.skills?.[metric]?.experience || 0;
+            const baselineXp = baseline?.skills?.[metric]?.experience || 0;
+            gain = currentXp - baselineXp;
+          } else if (tile.type === 'kills' || tile.type === 'kc') {
+            // Boss KC gain
+            const currentKc = current?.bosses?.[metric]?.kills || 0;
+            const baselineKc = baseline?.bosses?.[metric]?.kills || 0;
+            gain = currentKc - baselineKc;
+          }
+          
+          teamTotal += Math.max(0, gain);
+        }
+        
+        teamProgress[team.id] = teamTotal;
+      }
+      
+      // Update progress in database
+      for (const team of (teams || [])) {
+        const currentValue = teamProgress[team.id] || 0;
+        let completed = false;
+        
+        if (isCompetition) {
+          // Competition tile: highest value wins (determined at event end)
+          const maxValue = Math.max(...Object.values(teamProgress));
+          completed = currentValue > 0 && currentValue === maxValue;
+        } else {
+          // Target tile: first to reach target wins
+          completed = currentValue >= tile.target_value;
+        }
+        
+        // Upsert progress
+        const { data: existing } = await supabase.from('progress')
+          .select('*')
+          .eq('tile_id', tile.id)
+          .eq('team_id', team.id);
+        
+        if (existing && existing.length > 0) {
+          // Don't overwrite if already completed (unless competition)
+          if (!existing[0].completed || isCompetition) {
+            await supabase.from('progress')
+              .update({ 
+                current_value: currentValue, 
+                completed,
+                completed_at: completed ? new Date().toISOString() : null
+              })
+              .eq('id', existing[0].id);
+          }
+        } else {
+          await supabase.from('progress')
+            .insert({ 
+              tile_id: tile.id, 
+              team_id: team.id, 
+              current_value: currentValue, 
+              completed,
+              completed_at: completed ? new Date().toISOString() : null
+            });
+        }
+      }
+      
+      results.push({ tile: tile.name, type: tile.type, isCompetition, teamProgress });
+    }
+    
+    await logActivity('PROGRESS_SYNC', `Progress beregnet for ${results.length} tiles`);
+    res.json({ success: true, results });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
