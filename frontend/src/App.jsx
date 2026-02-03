@@ -108,9 +108,10 @@ function App() {
       const tilesData = await tilesRes.json();
       const progressData = await progressRes.json();
       
-      setTeams(teamsData);
-      setTiles(tilesData);
-      setProgress(progressData);
+      // Ensure arrays (API might return error objects)
+      setTeams(Array.isArray(teamsData) ? teamsData : []);
+      setTiles(Array.isArray(tilesData) ? tilesData : []);
+      setProgress(Array.isArray(progressData) ? progressData : []);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
