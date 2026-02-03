@@ -30,6 +30,10 @@ function App() {
     const saved = localStorage.getItem('myTeamId');
     return saved ? parseInt(saved) : null;
   });
+  const [selectedPlayer, setSelectedPlayer] = useState(() => {
+    const saved = localStorage.getItem('myPlayer');
+    return saved ? JSON.parse(saved) : null;
+  });
 
   const handleTeamSelect = (teamId) => {
     setSelectedTeamId(teamId);
@@ -37,6 +41,15 @@ function App() {
       localStorage.setItem('myTeamId', teamId.toString());
     } else {
       localStorage.removeItem('myTeamId');
+    }
+  };
+
+  const handlePlayerSelect = (player) => {
+    setSelectedPlayer(player);
+    if (player) {
+      localStorage.setItem('myPlayer', JSON.stringify(player));
+    } else {
+      localStorage.removeItem('myPlayer');
     }
   };
   
@@ -245,7 +258,9 @@ function App() {
             <TeamSelector 
               teams={teams} 
               selectedTeamId={selectedTeamId} 
-              onSelect={handleTeamSelect} 
+              onSelect={handleTeamSelect}
+              selectedPlayer={selectedPlayer}
+              onPlayerSelect={handlePlayerSelect}
             />
             <PotDisplay />
           </div>
