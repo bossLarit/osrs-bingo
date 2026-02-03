@@ -15,6 +15,7 @@ function TeamManager({ teams, onUpdate }) {
   const [loading, setLoading] = useState(false);
   const [distributing, setDistributing] = useState(false);
   const [showRandomModal, setShowRandomModal] = useState(false);
+  const [showBalancedModal, setShowBalancedModal] = useState(false);
   
   // All players from database
   const [allPlayers, setAllPlayers] = useState([]);
