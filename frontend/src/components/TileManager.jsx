@@ -598,13 +598,13 @@ function TileManager({ tiles, teams, onUpdate }) {
 
               <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
-                  <label className="block text-osrs-brown mb-1 text-sm">Mål Værdi</label>
+                  <label className="block text-osrs-brown mb-1 text-sm">Mål Værdi (0 = konkurrence)</label>
                   <input
                     type="number"
                     value={formData.target_value}
-                    onChange={(e) => setFormData({ ...formData, target_value: parseInt(e.target.value) })}
+                    onChange={(e) => setFormData({ ...formData, target_value: parseInt(e.target.value) || 0 })}
                     className="input-osrs w-full rounded"
-                    min={1}
+                    min={0}
                   />
                 </div>
                 <div>
