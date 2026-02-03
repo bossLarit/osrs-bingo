@@ -1,6 +1,7 @@
 import { getTileIcon } from '../utils/tileIcons';
+import { Target } from 'lucide-react';
 
-function BingoTile({ tile, leadingTeam, progress, isCompleted, bingoColor, voteCount, onVote, onHover, onLeave }) {
+function BingoTile({ tile, leadingTeam, progress, isCompleted, bingoColor, voteCount, isTeamFocus, hasTeamSelected, onVote, onHover, onLeave }) {
   const highestProgress = progress[0];
   const tileIcon = getTileIcon(tile);
   
@@ -19,6 +20,11 @@ function BingoTile({ tile, leadingTeam, progress, isCompleted, bingoColor, voteC
     border: `4px solid gold`
   } : {};
 
+  // Add team focus styling
+  const focusStyle = isTeamFocus ? {
+    boxShadow: '0 0 0 3px #a855f7, 0 0 15px #a855f7',
+  } : {};
+
   const handleVoteClick = (e) => {
     e.stopPropagation();
     onVote?.();
@@ -26,11 +32,12 @@ function BingoTile({ tile, leadingTeam, progress, isCompleted, bingoColor, voteC
 
   return (
     <div 
-      className={`bingo-tile rounded-lg overflow-hidden ${bingoColor ? 'bingo-line' : ''}`}
+      className={`bingo-tile rounded-lg overflow-hidden ${bingoColor ? 'bingo-line' : ''} ${isTeamFocus ? 'ring-2 ring-purple-500' : ''}`}
       style={{
         ...tileStyle,
         border: `3px solid ${tileStyle.borderColor}`,
-        ...bingoStyle
+        ...bingoStyle,
+        ...focusStyle
       }}
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
@@ -91,14 +98,24 @@ function BingoTile({ tile, leadingTeam, progress, isCompleted, bingoColor, voteC
         </div>
       )}
 
-      {/* Vote button */}
-      {!isCompleted && (
+      {/* Team Focus badge */}
+      {isTeamFocus && (
+        <div className="absolute top-1 right-8 bg-purple-600 text-white text-xs px-1.5 py-0.5 rounded flex items-center gap-1">
+          <Target size={10} />
+          <span>Fokus</span>
+        </div>
+      )}
+
+      {/* Vote button - only show if team is selected */}
+      {!isCompleted && hasTeamSelected && (
         <button
           onClick={handleVoteClick}
-          className="absolute bottom-1 right-1 bg-purple-600 hover:bg-purple-700 text-white text-xs px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors"
-          title="Stem på denne tile"
+          className={`absolute bottom-1 right-1 text-white text-xs px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors ${
+            voteCount > 0 ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-500 hover:bg-purple-600'
+          }`}
+          title="Stem på denne tile som fokus"
         >
-          <span>👍</span>
+          <Target size={12} />
           {voteCount > 0 && <span>{voteCount}</span>}
         </button>
       )}

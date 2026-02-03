@@ -3,16 +3,11 @@ import BingoTile from './BingoTile';
 import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
 
-function BingoBoard({ tiles, teams, progress, onRefresh }) {
+function BingoBoard({ tiles, teams, progress, onRefresh, selectedTeamId }) {
   const dialog = useDialog();
   const [hoveredTile, setHoveredTile] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [votes, setVotes] = useState({});
-  const [playerName, setPlayerName] = useState(() => localStorage.getItem('chatPlayerName') || '');
-  const [selectedTeamId, setSelectedTeamId] = useState(() => {
-    const saved = localStorage.getItem('selectedTeamId');
-    return saved ? parseInt(saved) : null;
-  });
 
   useEffect(() => {
     fetchVotes();
@@ -29,37 +24,12 @@ function BingoBoard({ tiles, teams, progress, onRefresh }) {
   };
 
   const handleVote = async (tileId) => {
-    let currentPlayerName = playerName;
-    let currentTeamId = selectedTeamId;
-
-    if (!currentPlayerName) {
-      const name = await dialog.prompt('Indtast dit spillernavn:', {
-        title: 'Stem på Tile',
-        placeholder: 'Dit OSRS navn...'
-      });
-      if (!name) return;
-      currentPlayerName = name;
-      setPlayerName(name);
-      localStorage.setItem('chatPlayerName', name);
-    }
-    
-    if (!currentTeamId) {
-      // Show team selection
-      const teamList = teams.map((t, i) => `${i + 1}. ${t.name}`).join('\n');
-      const choice = await dialog.prompt(`Vælg dit hold (indtast nummer):\n${teamList}`, {
+    if (!selectedTeamId) {
+      await dialog.alert('Vælg dit hold i toppen af siden først!', {
         title: 'Vælg Hold',
-        placeholder: '1, 2, 3...'
+        variant: 'warning'
       });
-      if (!choice) return;
-      const index = parseInt(choice) - 1;
-      if (index >= 0 && index < teams.length) {
-        currentTeamId = teams[index].id;
-        setSelectedTeamId(currentTeamId);
-        localStorage.setItem('selectedTeamId', currentTeamId.toString());
-      } else {
-        await dialog.error('Ugyldigt holdnummer');
-        return;
-      }
+      return;
     }
 
     try {
@@ -68,8 +38,7 @@ function BingoBoard({ tiles, teams, progress, onRefresh }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tile_id: tileId,
-          team_id: currentTeamId,
-          player_name: currentPlayerName
+          team_id: selectedTeamId
         })
       });
       fetchVotes();
@@ -78,10 +47,29 @@ function BingoBoard({ tiles, teams, progress, onRefresh }) {
     }
   };
 
+  // Get vote count for a tile (only for selected team)
   const getVoteCount = (tileId) => {
     if (!votes[tileId]) return 0;
-    return votes[tileId].length;
+    return votes[tileId].filter(v => v.team_id === selectedTeamId).length;
   };
+
+  // Get team's focus tile (tile with most votes from this team)
+  const getTeamFocusTile = () => {
+    if (!selectedTeamId) return null;
+    let maxVotes = 0;
+    let focusTileId = null;
+    
+    for (const [tileId, tileVotes] of Object.entries(votes)) {
+      const teamVotes = tileVotes.filter(v => v.team_id === selectedTeamId).length;
+      if (teamVotes > maxVotes) {
+        maxVotes = teamVotes;
+        focusTileId = parseInt(tileId);
+      }
+    }
+    return focusTileId;
+  };
+
+  const teamFocusTileId = getTeamFocusTile();
 
   // Calculate grid size based on number of tiles
   const gridSize = Math.ceil(Math.sqrt(tiles.length)) || 7;
@@ -232,6 +220,8 @@ function BingoBoard({ tiles, teams, progress, onRefresh }) {
           const bingoColor = isBingoTile(tile.position);
           const voteCount = getVoteCount(tile.id);
           
+          const isTeamFocus = teamFocusTileId === tile.id;
+          
           return (
             <BingoTile
               key={tile.id}
@@ -241,6 +231,8 @@ function BingoBoard({ tiles, teams, progress, onRefresh }) {
               isCompleted={isCompleted}
               bingoColor={bingoColor}
               voteCount={voteCount}
+              isTeamFocus={isTeamFocus}
+              hasTeamSelected={!!selectedTeamId}
               onVote={() => handleVote(tile.id)}
               onHover={(e) => handleTileHover(tile, e)}
               onLeave={() => setHoveredTile(null)}

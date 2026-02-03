@@ -14,6 +14,7 @@ import Stats from './components/Stats';
 import TeamChat from './components/TeamChat';
 import PotDisplay from './components/PotDisplay';
 import BingoTimer from './components/BingoTimer';
+import TeamSelector from './components/TeamSelector';
 import { apiUrl } from './api';
 
 function App() {
@@ -25,6 +26,19 @@ function App() {
   const [syncing, setSyncing] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('soundEnabled') !== 'false');
+  const [selectedTeamId, setSelectedTeamId] = useState(() => {
+    const saved = localStorage.getItem('myTeamId');
+    return saved ? parseInt(saved) : null;
+  });
+
+  const handleTeamSelect = (teamId) => {
+    setSelectedTeamId(teamId);
+    if (teamId) {
+      localStorage.setItem('myTeamId', teamId.toString());
+    } else {
+      localStorage.removeItem('myTeamId');
+    }
+  };
   
   // Fireworks state
   const { fireworksState, celebrate } = useFireworks();
@@ -228,6 +242,11 @@ function App() {
           <p className="text-osrs-border text-lg mb-4">Battle Royale Bingo Card</p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-2xl mx-auto">
             <BingoTimer onBingoStart={fetchData} />
+            <TeamSelector 
+              teams={teams} 
+              selectedTeamId={selectedTeamId} 
+              onSelect={handleTeamSelect} 
+            />
             <PotDisplay />
           </div>
         </header>
@@ -272,6 +291,7 @@ function App() {
                   teams={teams} 
                   progress={progress}
                   onRefresh={fetchData}
+                  selectedTeamId={selectedTeamId}
                 />
                 <LiveFeed />
               </>
