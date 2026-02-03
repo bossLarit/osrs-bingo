@@ -269,7 +269,8 @@ function AdminPanel({ teams = [], tiles = [], onUpdate }) {
     );
   }
 
-  const pendingProofs = proofs.filter(p => p.status === 'pending');
+  const safeProofs = Array.isArray(proofs) ? proofs : [];
+  const pendingProofs = safeProofs.filter(p => p.status === 'pending');
 
   return (
     <div className="osrs-border-dashed rounded-lg p-6">
@@ -437,13 +438,13 @@ function AdminPanel({ teams = [], tiles = [], onUpdate }) {
       </div>
 
       {/* All Proofs History */}
-      {proofs.filter(p => p.status !== 'pending').length > 0 && (
+      {safeProofs.filter(p => p.status !== 'pending').length > 0 && (
         <div className="mt-8">
           <h3 className="font-semibold text-osrs-brown mb-3">
             Bevis Historik
           </h3>
           <div className="space-y-2 max-h-64 overflow-y-auto">
-            {proofs.filter(p => p.status !== 'pending').map(proof => (
+            {safeProofs.filter(p => p.status !== 'pending').map(proof => (
               <div 
                 key={proof.id} 
                 className={`flex items-center gap-3 p-2 rounded text-sm ${

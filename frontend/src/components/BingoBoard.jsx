@@ -54,7 +54,7 @@ function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selected
 
   // Get vote count for a tile (only for selected team)
   const getVoteCount = (tileId) => {
-    if (!votes[tileId]) return 0;
+    if (!votes[tileId] || !Array.isArray(votes[tileId])) return 0;
     return votes[tileId].filter(v => v.team_id === selectedTeamId).length;
   };
 
@@ -65,6 +65,7 @@ function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selected
     let focusTileId = null;
     
     for (const [tileId, tileVotes] of Object.entries(votes)) {
+      if (!Array.isArray(tileVotes)) continue;
       const teamVotes = tileVotes.filter(v => v.team_id === selectedTeamId).length;
       if (teamVotes > maxVotes) {
         maxVotes = teamVotes;
