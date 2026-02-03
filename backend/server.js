@@ -931,20 +931,43 @@ app.post('/api/bingo/start', async (req, res) => {
         .eq('id', existing[0].id);
     }
     
-    // Save baseline stats for all players
+    // First sync all players from WOM to get current stats
     const { data: players } = await supabase.from('players').select('*');
     const playerResults = [];
+    
     for (const player of (players || [])) {
       try {
-        await supabase.from('players')
-          .update({ 
-            baseline_stats: player.current_stats,
-            baseline_timestamp: now.toISOString()
-          })
-          .eq('id', player.id);
-        playerResults.push({ username: player.username, success: true });
+        // Fetch current stats from WOM
+        const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
+        if (response.ok) {
+          const data = await response.json();
+          const currentStats = data.latestSnapshot?.data;
+          
+          // Update player with current stats as baseline
+          await supabase.from('players')
+            .update({ 
+              wom_id: data.id,
+              wom_data: data,
+              current_stats: currentStats,
+              baseline_stats: currentStats,
+              baseline_timestamp: now.toISOString()
+            })
+            .eq('id', player.id);
+          playerResults.push({ username: player.username, success: true });
+        } else {
+          // Fallback to existing current_stats if WOM fails
+          await supabase.from('players')
+            .update({ 
+              baseline_stats: player.current_stats,
+              baseline_timestamp: now.toISOString()
+            })
+            .eq('id', player.id);
+          playerResults.push({ username: player.username, success: false, error: 'WOM not found' });
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit
       } catch (e) {
-        playerResults.push({ username: player.username, success: false });
+        playerResults.push({ username: player.username, success: false, error: e.message });
       }
     }
     
