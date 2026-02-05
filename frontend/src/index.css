@@ -120,7 +120,7 @@ body {
   min-width: 280px;
   max-width: 350px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 /* Modal overlay */
