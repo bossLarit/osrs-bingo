@@ -254,13 +254,15 @@ function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selected
           progress={getTileProgress(hoveredTile.id)}
           teams={safeTeams}
           position={tooltipPosition}
+          onMouseEnter={() => setHoveredTile(hoveredTile)}
+          onMouseLeave={() => setHoveredTile(null)}
         />
       )}
     </div>
   );
 }
 
-function TileTooltip({ tile, progress = [], teams = [], position }) {
+function TileTooltip({ tile, progress = [], teams = [], position, onMouseEnter, onMouseLeave }) {
   const [expandedTeams, setExpandedTeams] = useState({});
   
   // Ensure arrays
@@ -297,6 +299,8 @@ function TileTooltip({ tile, progress = [], teams = [], position }) {
         left: Math.min(position.x - 140, window.innerWidth - 300),
         top: Math.max(position.y - 220, 10),
       }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       <h3 className="text-osrs-gold font-bold text-lg mb-2">{tile.name}</h3>
       {tile.description && (
