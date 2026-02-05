@@ -76,12 +76,12 @@ function Scoreboard({ teams = [], progress = [], tiles = [] }) {
               
               {/* Expanded team members */}
               {expandedTeam === team.id && (
-                <div className="ml-16 py-3 px-4 bg-osrs-dark bg-opacity-5 rounded-lg mt-2 mb-2">
-                  <h4 className="text-sm font-semibold text-osrs-brown mb-2">Holdmedlemmer:</h4>
+                <div className="ml-16 py-3 px-4 bg-osrs-dark bg-opacity-5 dark:bg-osrs-light dark:bg-opacity-10 rounded-lg mt-2 mb-2">
+                  <h4 className="text-sm font-semibold text-osrs-brown dark:text-osrs-gold mb-2">Holdmedlemmer:</h4>
                   {team.members && team.members.length > 0 ? (
                     <div className="space-y-1">
                       {team.members.map((member, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-sm text-osrs-dark">
+                        <div key={idx} className="flex items-center gap-2 text-sm text-osrs-dark dark:text-osrs-light">
                           <div 
                             className="w-2 h-2 rounded-full"
                             style={{ backgroundColor: team.color }}

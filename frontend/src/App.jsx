@@ -312,14 +312,16 @@ function App() {
               <span className="hidden sm:inline">{tab.label}</span>
             </button>
           ))}
-          <button
-            onClick={syncWithWOM}
-            disabled={syncing}
-            className="btn-osrs flex items-center gap-1 px-2 py-1.5 rounded text-sm"
-          >
-            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
-            <span className="hidden md:inline">{syncing ? 'Syncing...' : 'Sync'}</span>
-          </button>
+          {isAdmin && (
+            <button
+              onClick={syncWithWOM}
+              disabled={syncing}
+              className="btn-osrs flex items-center gap-1 px-2 py-1.5 rounded text-sm"
+            >
+              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+              <span className="hidden md:inline">{syncing ? 'Syncing...' : 'Sync'}</span>
+            </button>
+          )}
         </nav>
 
         {/* Main Content */}

@@ -146,7 +146,7 @@ function DialogModal({ type, title, message, confirmText, cancelText, variant, o
 
         {/* Body */}
         <div className="p-5">
-          <p className="text-osrs-dark leading-relaxed">{message}</p>
+          <p className="text-osrs-dark dark:text-osrs-light leading-relaxed">{message}</p>
           
           {type === 'prompt' && (
             <input

@@ -261,9 +261,15 @@ function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selected
 }
 
 function TileTooltip({ tile, progress = [], teams = [], position }) {
+  const [expandedTeams, setExpandedTeams] = useState({});
+  
   // Ensure arrays
   const safeProgress = Array.isArray(progress) ? progress : [];
   const safeTeams = Array.isArray(teams) ? teams : [];
+  
+  const toggleTeam = (teamId) => {
+    setExpandedTeams(prev => ({ ...prev, [teamId]: !prev[teamId] }));
+  };
   
   // Combine all teams with their progress (show 0 for teams without progress)
   const allTeamsProgress = safeTeams.map(team => {
@@ -271,7 +277,8 @@ function TileTooltip({ tile, progress = [], teams = [], position }) {
     return {
       team,
       current_value: teamProgress?.current_value || 0,
-      completed: teamProgress?.completed || false
+      completed: teamProgress?.completed || false,
+      player_contributions: teamProgress?.player_contributions || []
     };
   }).sort((a, b) => {
     // Completed first, then by value
@@ -318,52 +325,77 @@ function TileTooltip({ tile, progress = [], teams = [], position }) {
             {allTeamsProgress.map((item, idx) => {
               const isLeader = idx === 0 && item.current_value > 0;
               return (
-                <div 
-                  key={item.team.id}
-                  className={`flex items-center justify-between text-sm p-1 rounded ${
-                    isLeader ? 'bg-osrs-gold bg-opacity-20' : ''
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    {item.team.logo_url ? (
-                      <img 
-                        src={item.team.logo_url} 
-                        alt=""
-                        className="w-4 h-4 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div 
-                        className="w-4 h-4 rounded-full"
-                        style={{ backgroundColor: item.team.color }}
-                      />
-                    )}
-                    <span className={isLeader ? 'text-osrs-gold font-semibold' : 'text-gray-300'}>
-                      {item.team.name}
-                    </span>
-                    {isLeader && <span className="text-osrs-gold text-xs">👑</span>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {tile.target_value > 1 ? (
-                      <div className="flex items-center gap-1">
-                        <div className="w-16 h-2 bg-gray-700 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full ${item.completed ? 'bg-green-500' : 'bg-osrs-gold'}`}
-                            style={{ width: `${Math.min((item.current_value / tile.target_value) * 100, 100)}%` }}
-                          />
-                        </div>
-                        <span className={item.completed ? 'text-green-400' : 'text-gray-400'}>
-                          {item.current_value}/{tile.target_value}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className={item.completed ? 'text-green-400' : 'text-gray-400'}>
-                        {item.current_value}
+                <div key={item.team.id}>
+                  <div 
+                    className={`flex items-center justify-between text-sm p-1 rounded cursor-pointer hover:bg-gray-700 ${
+                      isLeader ? 'bg-osrs-gold bg-opacity-20' : ''
+                    }`}
+                    onClick={() => toggleTeam(item.team.id)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500 text-xs">
+                        {expandedTeams[item.team.id] ? '▼' : '▶'}
                       </span>
-                    )}
-                    {item.completed && (
-                      <span className="text-green-400 text-xs">✓</span>
-                    )}
+                      {item.team.logo_url ? (
+                        <img 
+                          src={item.team.logo_url} 
+                          alt=""
+                          className="w-4 h-4 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div 
+                          className="w-4 h-4 rounded-full"
+                          style={{ backgroundColor: item.team.color }}
+                        />
+                      )}
+                      <span className={isLeader ? 'text-osrs-gold font-semibold' : 'text-gray-300'}>
+                        {item.team.name}
+                      </span>
+                      {isLeader && <span className="text-osrs-gold text-xs">👑</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {tile.target_value > 1 ? (
+                        <div className="flex items-center gap-1">
+                          <div className="w-16 h-2 bg-gray-700 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full ${item.completed ? 'bg-green-500' : 'bg-osrs-gold'}`}
+                              style={{ width: `${Math.min((item.current_value / tile.target_value) * 100, 100)}%` }}
+                            />
+                          </div>
+                          <span className={item.completed ? 'text-green-400' : 'text-gray-400'}>
+                            {item.current_value}/{tile.target_value}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className={item.completed ? 'text-green-400' : 'text-gray-400'}>
+                          {item.current_value}
+                        </span>
+                      )}
+                      {item.completed && (
+                        <span className="text-green-400 text-xs">✓</span>
+                      )}
+                    </div>
                   </div>
+                  
+                  {/* Expanded player contributions */}
+                  {expandedTeams[item.team.id] && (
+                    <div className="ml-6 mt-1 mb-2 pl-2 border-l border-gray-600">
+                      {item.player_contributions && item.player_contributions.length > 0 ? (
+                        item.player_contributions
+                          .sort((a, b) => (b.contribution || 0) - (a.contribution || 0))
+                          .map((player, pIdx) => (
+                            <div key={pIdx} className="flex justify-between text-xs text-gray-400 py-0.5">
+                              <span>{player.username}</span>
+                              <span className="text-gray-300">+{player.contribution || 0}</span>
+                            </div>
+                          ))
+                      ) : (
+                        <div className="text-xs text-gray-500 italic">
+                          Ingen individuelle bidrag registreret
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

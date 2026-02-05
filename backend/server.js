@@ -872,9 +872,12 @@ app.post('/api/sync/progress', async (req, res) => {
       const teamProgress = {};
       
       // Calculate progress for each team based on their players
+      const teamPlayerContributions = {};
+      
       for (const team of (teams || [])) {
         const teamPlayers = (players || []).filter(p => p.team_id === team.id);
         let teamTotal = 0;
+        const playerContributions = [];
         
         for (const player of teamPlayers) {
           const current = player.current_stats;
@@ -883,7 +886,10 @@ app.post('/api/sync/progress', async (req, res) => {
           // Debug logging
           console.log(`Player ${player.username}: current_stats exists: ${!!current}, baseline_stats exists: ${!!baseline}`);
           
-          if (!current || !baseline) continue;
+          if (!current || !baseline) {
+            playerContributions.push({ username: player.username, contribution: 0 });
+            continue;
+          }
           
           let gain = 0;
           const metric = tile.metric?.toLowerCase();
@@ -901,10 +907,13 @@ app.post('/api/sync/progress', async (req, res) => {
             gain = currentKc - baselineKc;
           }
           
-          teamTotal += Math.max(0, gain);
+          const playerGain = Math.max(0, gain);
+          teamTotal += playerGain;
+          playerContributions.push({ username: player.username, contribution: playerGain });
         }
         
         teamProgress[team.id] = teamTotal;
+        teamPlayerContributions[team.id] = playerContributions;
       }
       
       // Update progress in database
@@ -927,6 +936,8 @@ app.post('/api/sync/progress', async (req, res) => {
           .eq('tile_id', tile.id)
           .eq('team_id', team.id);
         
+        const contributions = teamPlayerContributions[team.id] || [];
+        
         if (existing && existing.length > 0) {
           // Don't overwrite if already completed (unless competition)
           if (!existing[0].completed || isCompetition) {
@@ -934,7 +945,8 @@ app.post('/api/sync/progress', async (req, res) => {
               .update({ 
                 current_value: currentValue, 
                 completed,
-                completed_at: completed ? new Date().toISOString() : null
+                completed_at: completed ? new Date().toISOString() : null,
+                player_contributions: contributions
               })
               .eq('id', existing[0].id);
           }
@@ -945,7 +957,8 @@ app.post('/api/sync/progress', async (req, res) => {
               team_id: team.id, 
               current_value: currentValue, 
               completed,
-              completed_at: completed ? new Date().toISOString() : null
+              completed_at: completed ? new Date().toISOString() : null,
+              player_contributions: contributions
             });
         }
       }
@@ -987,7 +1000,15 @@ app.post('/api/bingo/start', async (req, res) => {
     
     for (const player of (players || [])) {
       try {
-        // Fetch current stats from WOM
+        // First, force WOM to update the player's stats (POST triggers a fresh hiscore lookup)
+        const updateResponse = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for WOM to process
+        
+        // Then fetch the fresh stats
         const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
         if (response.ok) {
           const data = await response.json();
@@ -1003,7 +1024,7 @@ app.post('/api/bingo/start', async (req, res) => {
               baseline_timestamp: now.toISOString()
             })
             .eq('id', player.id);
-          playerResults.push({ username: player.username, success: true });
+          playerResults.push({ username: player.username, success: true, updated: updateResponse.ok });
         } else {
           // Fallback to existing current_stats if WOM fails
           await supabase.from('players')
@@ -1015,7 +1036,7 @@ app.post('/api/bingo/start', async (req, res) => {
           playerResults.push({ username: player.username, success: false, error: 'WOM not found' });
         }
         
-        await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit
+        await new Promise(resolve => setTimeout(resolve, 300)); // Rate limit between players
       } catch (e) {
         playerResults.push({ username: player.username, success: false, error: e.message });
       }

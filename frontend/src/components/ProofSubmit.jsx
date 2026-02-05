@@ -233,29 +233,13 @@ function ProofSubmit({ tiles = [], teams = [], onUpdate }) {
                 </div>
                 <div>
                   <label className="block text-osrs-brown mb-1 text-sm">Antal (for collection felter)</label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, count: Math.max(1, formData.count - 1) })}
-                      className="btn-osrs rounded px-3 py-1"
-                    >
-                      -
-                    </button>
-                    <input
-                      type="number"
-                      value={formData.count}
-                      onChange={(e) => setFormData({ ...formData, count: Math.max(1, parseInt(e.target.value) || 1) })}
-                      className="input-osrs w-16 rounded text-center"
-                      min={1}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, count: formData.count + 1 })}
-                      className="btn-osrs rounded px-3 py-1"
-                    >
-                      +
-                    </button>
-                  </div>
+                  <input
+                    type="number"
+                    value={formData.count}
+                    onChange={(e) => setFormData({ ...formData, count: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="input-osrs w-full rounded"
+                    min={1}
+                  />
                   <p className="text-xs text-osrs-border mt-1">
                     F.eks. 2 Barrows pieces i ét drop
                   </p>

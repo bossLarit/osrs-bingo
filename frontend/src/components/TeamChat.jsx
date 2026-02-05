@@ -146,7 +146,7 @@ function TeamChat({ teams }) {
                     <span className="font-bold text-osrs-brown">{msg.player_name}</span>
                     <span className="text-xs text-osrs-border">{formatTime(msg.timestamp)}</span>
                   </div>
-                  <p className="text-osrs-dark break-words">{msg.message}</p>
+                  <p className="text-osrs-dark dark:text-osrs-light break-words">{msg.message}</p>
                 </div>
               ))
             )}

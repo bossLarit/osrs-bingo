@@ -4,6 +4,7 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
@@ -12,6 +13,7 @@ export default {
         'osrs-beige': '#f5e6c8',
         'osrs-dark': '#1a1510',
         'osrs-border': '#8b7355',
+        'osrs-light': '#e8dcc8',
       },
       fontFamily: {
         'runescape': ['Runescape', 'Georgia', 'serif'],
