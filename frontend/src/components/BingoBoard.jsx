@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import BingoTile from './BingoTile';
 import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
@@ -13,6 +13,7 @@ function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selected
   const [hoveredTile, setHoveredTile] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [votes, setVotes] = useState({});
+  const hideTimeoutRef = useRef(null);
 
   useEffect(() => {
     fetchVotes();
@@ -152,6 +153,12 @@ function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selected
   };
 
   const handleTileHover = (tile, event) => {
+    // Clear any pending hide timeout
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+    
     if (tile) {
       const rect = event.currentTarget.getBoundingClientRect();
       setTooltipPosition({
@@ -160,6 +167,25 @@ function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selected
       });
     }
     setHoveredTile(tile);
+  };
+  
+  const handleTileLeave = () => {
+    // Delay hiding to allow mouse to reach tooltip
+    hideTimeoutRef.current = setTimeout(() => {
+      setHoveredTile(null);
+    }, 300);
+  };
+  
+  const handleTooltipEnter = () => {
+    // Cancel hide when entering tooltip
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+  };
+  
+  const handleTooltipLeave = () => {
+    setHoveredTile(null);
   };
 
   // Get progress for a specific tile
@@ -241,7 +267,7 @@ function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selected
               hasTeamSelected={!!selectedTeamId}
               onVote={() => handleVote(tile.id)}
               onHover={(e) => handleTileHover(tile, e)}
-              onLeave={() => setHoveredTile(null)}
+              onLeave={handleTileLeave}
             />
           );
         })}
@@ -254,8 +280,8 @@ function BingoBoard({ tiles = [], teams = [], progress = [], onRefresh, selected
           progress={getTileProgress(hoveredTile.id)}
           teams={safeTeams}
           position={tooltipPosition}
-          onMouseEnter={() => setHoveredTile(hoveredTile)}
-          onMouseLeave={() => setHoveredTile(null)}
+          onMouseEnter={handleTooltipEnter}
+          onMouseLeave={handleTooltipLeave}
         />
       )}
     </div>
