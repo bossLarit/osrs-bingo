@@ -180,6 +180,9 @@ function TileManager({ tiles = [], teams = [], onUpdate }) {
   const [showProgressModal, setShowProgressModal] = useState(null);
   const [showSkillSelector, setShowSkillSelector] = useState(false);
   const [showPetSelector, setShowPetSelector] = useState(false);
+  const [showBoardPicker, setShowBoardPicker] = useState(false);
+  const [savedBoards, setSavedBoards] = useState([]);
+  const [boardsLoading, setBoardsLoading] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -398,28 +401,35 @@ function TileManager({ tiles = [], teams = [], onUpdate }) {
     }
   };
 
-  const loadBoard = async () => {
+  const openBoardPicker = async () => {
+    setBoardsLoading(true);
+    setShowBoardPicker(true);
     try {
       const res = await fetch(apiUrl('/api/boards'));
-      const boards = await res.json();
-      if (boards.length === 0) {
-        await dialog.alert('Ingen gemte boards fundet');
-        return;
-      }
-      const boardNames = boards.map((b, i) => `${i + 1}. ${b.name}`).join('\n');
-      const choice = await dialog.prompt(`Vælg et board (indtast nummer):\n${boardNames}`, {
-        title: 'Indlæs board'
-      });
-      if (!choice) return;
-      
-      const index = parseInt(choice) - 1;
-      if (index >= 0 && index < boards.length) {
-        await fetch(apiUrl(`/api/boards/${boards[index].id}/load`), { method: 'POST' });
-        onUpdate();
-        await dialog.success('Board indlæst!');
-      }
+      const data = await res.json();
+      setSavedBoards(Array.isArray(data) ? data : []);
     } catch (error) {
-      console.error('Error loading board:', error);
+      console.error('Error fetching boards:', error);
+      setSavedBoards([]);
+    } finally {
+      setBoardsLoading(false);
+    }
+  };
+
+  const pickAndLoadBoard = async (board) => {
+    const ok = await dialog.confirm(
+      `Indlæs "${board.name}"? Dit nuværende board gemmes automatisk som backup først.`,
+      { title: 'Indlæs board', confirmText: 'Ja, indlæs' }
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch(apiUrl(`/api/boards/${board.id}/safe-load`), { method: 'POST' });
+      if (!res.ok) throw new Error('Indlæsning fejlede');
+      setShowBoardPicker(false);
+      onUpdate();
+      await dialog.success(`"${board.name}" indlæst. Auto-backup gemt.`);
+    } catch (e) {
+      await dialog.error(e.message);
     }
   };
 
@@ -458,7 +468,7 @@ function TileManager({ tiles = [], teams = [], onUpdate }) {
             Gem Board
           </button>
           <button
-            onClick={loadBoard}
+            onClick={openBoardPicker}
             className="btn-osrs flex items-center gap-2 rounded"
           >
             <Download size={18} />
@@ -688,6 +698,57 @@ function TileManager({ tiles = [], teams = [], onUpdate }) {
         onClose={() => setShowPetSelector(false)}
         onSelect={selectPet}
       />
+
+      {/* Board Picker Modal */}
+      {showBoardPicker && (
+        <div className="modal-overlay" onClick={() => setShowBoardPicker(false)}>
+          <div className="modal-content p-6 max-w-2xl w-full" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-osrs-brown flex items-center gap-2">
+                <Download size={20} />
+                Indlæs gemt board
+              </h3>
+              <button onClick={() => setShowBoardPicker(false)} className="text-osrs-brown hover:text-red-600 p-1">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-osrs-border mb-4">
+              Klik på et board for at indlæse det. Dit nuværende board gemmes automatisk som
+              auto-backup først, så intet går tabt.
+            </p>
+            {boardsLoading ? (
+              <div className="text-center py-8 text-osrs-border">Indlæser...</div>
+            ) : savedBoards.length === 0 ? (
+              <div className="text-center py-8 text-osrs-border">
+                <Download size={36} className="mx-auto mb-2 opacity-40" />
+                <p>Du har ingen gemte boards endnu.</p>
+                <p className="text-xs mt-1">Tryk på "Gem Board" først.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto">
+                {savedBoards.map((board) => (
+                  <button
+                    key={board.id}
+                    onClick={() => pickAndLoadBoard(board)}
+                    className="text-left p-3 bg-white bg-opacity-60 hover:bg-opacity-90 border-2 border-osrs-border rounded-lg transition-all hover:scale-[1.02]"
+                  >
+                    <div className="font-bold text-osrs-brown truncate">{board.name}</div>
+                    <div className="text-xs text-osrs-border mt-1">
+                      {(board.tiles?.length || 0)} felter
+                      {board.created_at && ` · ${new Date(board.created_at).toLocaleDateString('da-DK')}`}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end mt-4">
+              <button onClick={() => setShowBoardPicker(false)} className="btn-osrs rounded">
+                Annuller
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
