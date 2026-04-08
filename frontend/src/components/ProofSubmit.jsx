@@ -21,9 +21,16 @@ function ProofSubmit({ tiles = [], teams = [], onUpdate }) {
     count: 1
   });
   const [loading, setLoading] = useState(false);
+  const [eventEnded, setEventEnded] = useState(false);
 
   useEffect(() => {
     fetchProofs();
+    fetch(apiUrl('/api/bingo/status'))
+      .then((r) => r.json())
+      .then((s) => {
+        if (s.event_end && new Date(s.event_end) < new Date()) setEventEnded(true);
+      })
+      .catch(() => {});
   }, []);
 
   const fetchProofs = async () => {
@@ -39,6 +46,10 @@ function ProofSubmit({ tiles = [], teams = [], onUpdate }) {
 
   const submitProof = async (e) => {
     e.preventDefault();
+    if (eventEnded) {
+      await dialog.alert('Bingoen er afsluttet - ingen flere beviser modtages', { title: 'Event slut' });
+      return;
+    }
     if (!formData.tile_id || !formData.team_id) {
       await dialog.alert('Vælg venligst et felt og et hold', { title: 'Manglende information' });
       return;
@@ -99,12 +110,19 @@ function ProofSubmit({ tiles = [], teams = [], onUpdate }) {
         </div>
         <button
           onClick={() => setShowSubmitModal(true)}
-          className="btn-osrs flex items-center gap-2 rounded"
+          disabled={eventEnded}
+          className="btn-osrs flex items-center gap-2 rounded disabled:opacity-50"
+          title={eventEnded ? 'Bingoen er afsluttet' : ''}
         >
           <Send size={18} />
-          Indsend Bevis
+          {eventEnded ? 'Event afsluttet' : 'Indsend Bevis'}
         </button>
       </div>
+      {eventEnded && (
+        <div className="mb-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded text-sm">
+          ⏰ Bingoen er slut - der modtages ikke flere beviser.
+        </div>
+      )}
 
       <p className="text-sm text-osrs-border mb-6">
         Del screenshots og beviser for at claime felter. F.eks. longest drystreak, drops, etc.

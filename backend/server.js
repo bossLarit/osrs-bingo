@@ -777,9 +777,92 @@ app.post('/api/votes', async (req, res) => {
 
 // ============ WOM SYNC ============
 
-// Rate limit: 1 sync per hour
+// Rate limit: WOM allows 1 update per player per hour
 let lastSyncTime = null;
 const SYNC_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+// Per-player throttle (in-memory; backed by players.last_wom_sync if column exists)
+const playerSyncTimes = {};
+
+function canSyncPlayer(player) {
+  const t = playerSyncTimes[player.id] || (player.last_wom_sync ? new Date(player.last_wom_sync).getTime() : 0);
+  return Date.now() - t >= SYNC_COOLDOWN_MS;
+}
+
+function nextPlayerSyncMs(player) {
+  const t = playerSyncTimes[player.id] || (player.last_wom_sync ? new Date(player.last_wom_sync).getTime() : 0);
+  return Math.max(0, SYNC_COOLDOWN_MS - (Date.now() - t));
+}
+
+async function fetchAndStorePlayerWOM(player) {
+  // POST to force WOM refresh, then GET fresh data
+  await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  }).catch(() => {});
+  await new Promise(r => setTimeout(r, 500));
+  const response = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`);
+  if (!response.ok) return { ok: false, error: 'Not found on WOM' };
+  const data = await response.json();
+  const update = {
+    wom_id: data.id,
+    wom_data: data,
+    current_stats: data.latestSnapshot?.data,
+  };
+  // Try to set last_wom_sync (column may not exist on older DBs - swallow error)
+  try {
+    await supabase.from('players').update({ ...update, last_wom_sync: new Date().toISOString() }).eq('id', player.id);
+  } catch (e) {
+    await supabase.from('players').update(update).eq('id', player.id);
+  }
+  playerSyncTimes[player.id] = Date.now();
+  return { ok: true, data };
+}
+
+// Single-player sync (respects 1h cooldown)
+app.post('/api/players/:id/sync', async (req, res) => {
+  try {
+    const playerId = parseInt(req.params.id);
+    const { data: player } = await supabase.from('players').select('*').eq('id', playerId).single();
+    if (!player) return res.status(404).json({ error: 'Player not found' });
+    if (!canSyncPlayer(player)) {
+      return res.status(429).json({
+        error: 'Player on cooldown',
+        nextSyncIn: nextPlayerSyncMs(player)
+      });
+    }
+    const result = await fetchAndStorePlayerWOM(player);
+    if (!result.ok) return res.status(502).json({ error: result.error });
+    // Recompute progress for this player
+    await fetch(`http://localhost:${PORT}/api/sync/progress`, { method: 'POST' }).catch(() => {});
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Daily auto-refresh: every 24 hours, sync all players that are eligible
+async function dailyAutoRefresh() {
+  try {
+    console.log('[auto-refresh] running daily WOM sync');
+    const { data: players } = await supabase.from('players').select('*');
+    for (const p of (players || [])) {
+      if (!canSyncPlayer(p)) continue;
+      try { await fetchAndStorePlayerWOM(p); } catch (e) { console.error('auto-refresh', p.username, e.message); }
+      await new Promise(r => setTimeout(r, 300));
+    }
+    // Recompute progress
+    try {
+      const { data: tilesExist } = await supabase.from('tiles').select('id').limit(1);
+      if (tilesExist && tilesExist.length) {
+        await fetch(`http://localhost:${PORT}/api/sync/progress`, { method: 'POST' }).catch(() => {});
+      }
+    } catch (e) {}
+    await logActivity('AUTO_REFRESH', `Daglig auto-sync gennemført`);
+  } catch (e) {
+    console.error('[auto-refresh] failed', e);
+  }
+}
+setInterval(dailyAutoRefresh, 24 * 60 * 60 * 1000);
 
 app.get('/api/sync/status', async (req, res) => {
   const now = Date.now();
@@ -1112,6 +1195,175 @@ app.post('/api/boards/:id/load', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+app.patch('/api/boards/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name required' });
+    const { data, error } = await supabase.from('boards').update({ name }).eq('id', id).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/boards/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    await supabase.from('boards').delete().eq('id', id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/boards/:id/duplicate', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { data: src } = await supabase.from('boards').select('*').eq('id', id).single();
+    if (!src) return res.status(404).json({ error: 'Board not found' });
+    const { data, error } = await supabase.from('boards')
+      .insert({ name: `${src.name} (kopi)`, tiles: src.tiles })
+      .select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Auto-snapshot current board, then load target board (safe load)
+app.post('/api/boards/:id/safe-load', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { data: target } = await supabase.from('boards').select('*').eq('id', id).single();
+    if (!target) return res.status(404).json({ error: 'Board not found' });
+
+    // Snapshot current tiles as auto-backup
+    const { data: currentTiles } = await supabase.from('tiles').select('*');
+    if (currentTiles && currentTiles.length > 0) {
+      const stamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      await supabase.from('boards').insert({ name: `Auto-backup ${stamp}`, tiles: currentTiles });
+    }
+
+    // Replace tiles
+    await supabase.from('tiles').delete().neq('id', 0);
+    if (target.tiles && target.tiles.length > 0) {
+      const tilesToInsert = target.tiles.map(t => ({
+        name: t.name, description: t.description, type: t.type, metric: t.metric,
+        target_value: t.target_value, points: t.points, image_url: t.image_url, position: t.position
+      }));
+      await supabase.from('tiles').insert(tilesToInsert);
+    }
+    await logActivity('BOARD_LOADED', `Board "${target.name}" indlæst (auto-backup gemt)`);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============ PRE-FLIGHT ============
+app.get('/api/admin/preflight', async (req, res) => {
+  try {
+    const checks = [];
+    const config = await getConfig();
+
+    // 1. WOM reachable
+    try {
+      const r = await fetch('https://api.wiseoldman.net/v2/players/zezima');
+      checks.push({ id: 'wom', label: 'Wise Old Man API tilgængelig', ok: r.ok, critical: true });
+    } catch (e) {
+      checks.push({ id: 'wom', label: 'Wise Old Man API tilgængelig', ok: false, critical: true, detail: e.message });
+    }
+
+    // 2. PIN set
+    checks.push({ id: 'pin', label: 'Site PIN er sat', ok: !!(config.site_pin && config.site_pin.length >= 4), critical: true });
+
+    // 3. Admin password set (and not the default)
+    checks.push({ id: 'admin', label: 'Admin password er sat (ikke "changeme")', ok: !!config.admin_password && config.admin_password !== 'changeme', critical: true });
+
+    // 4. Event window valid
+    const startOk = !!config.event_start;
+    const endOk = !!config.event_end;
+    const orderOk = startOk && endOk && new Date(config.event_start) < new Date(config.event_end);
+    checks.push({ id: 'window', label: 'Event start og slut er sat korrekt', ok: orderOk, critical: false });
+
+    // 5. Teams + players
+    const { data: teams } = await supabase.from('teams').select('*');
+    const { data: players } = await supabase.from('players').select('*');
+    const teamsWithPlayers = (teams || []).filter(t => (players || []).some(p => p.team_id === t.id));
+    checks.push({ id: 'teams', label: `Mindst ét hold med spillere (${teamsWithPlayers.length})`, ok: teamsWithPlayers.length >= 1, critical: true });
+
+    // 6. Tiles exist
+    const { data: tiles } = await supabase.from('tiles').select('id');
+    checks.push({ id: 'tiles', label: `Mindst ét felt på boardet (${(tiles || []).length})`, ok: (tiles || []).length >= 1, critical: true });
+
+    // 7. All players resolve on WOM
+    const playerChecks = [];
+    for (const p of (players || [])) {
+      try {
+        const r = await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(p.username)}`);
+        playerChecks.push({ username: p.username, ok: r.ok });
+      } catch (e) {
+        playerChecks.push({ username: p.username, ok: false });
+      }
+    }
+    const failedPlayers = playerChecks.filter(p => !p.ok);
+    checks.push({
+      id: 'players_wom',
+      label: `Alle spillere findes på WOM (${playerChecks.length - failedPlayers.length}/${playerChecks.length})`,
+      ok: failedPlayers.length === 0,
+      critical: true,
+      detail: failedPlayers.length ? `Fejler: ${failedPlayers.map(p => p.username).join(', ')}` : null
+    });
+
+    const canStart = checks.filter(c => c.critical).every(c => c.ok);
+    res.json({ checks, canStart });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Bulk: capture WOM baseline for any player missing one (after bingo started)
+app.post('/api/admin/backfill-baselines', async (req, res) => {
+  try {
+    const { admin_password } = req.body;
+    const config = await getConfig();
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(403).json({ error: 'Invalid admin password' });
+    }
+    const { data: players } = await supabase.from('players').select('*');
+    const now = new Date().toISOString();
+    let updated = 0;
+    for (const p of (players || [])) {
+      if (p.baseline_stats && p.baseline_timestamp) continue;
+      try {
+        const result = await fetchAndStorePlayerWOM(p);
+        if (result.ok) {
+          await supabase.from('players').update({
+            baseline_stats: result.data.latestSnapshot?.data,
+            baseline_timestamp: now
+          }).eq('id', p.id);
+          updated++;
+        }
+      } catch (e) {}
+      await new Promise(r => setTimeout(r, 300));
+    }
+    await logActivity('BASELINE_BACKFILL', `Baseline udfyldt for ${updated} spillere`);
+    res.json({ success: true, updated });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Capture baseline for a single player (for late joiners)
+app.post('/api/players/:id/baseline', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { data: player } = await supabase.from('players').select('*').eq('id', id).single();
+    if (!player) return res.status(404).json({ error: 'Player not found' });
+    const result = await fetchAndStorePlayerWOM(player);
+    if (!result.ok) return res.status(502).json({ error: result.error });
+    await supabase.from('players').update({
+      baseline_stats: result.data.latestSnapshot?.data,
+      baseline_timestamp: new Date().toISOString()
+    }).eq('id', id);
+    await logActivity('BASELINE_CAPTURED', `Baseline gemt for ${player.username}`);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ============ UNDO ============

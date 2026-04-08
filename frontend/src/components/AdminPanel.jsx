@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, Check, X, Image, MessageSquare, Users, Crown, Undo2, Clock, Calendar, Lock, Key } from 'lucide-react';
+import { Shield, Check, X, Image, MessageSquare, Users, Crown, Undo2, Clock, Calendar, Lock, Key, PlayCircle, RefreshCw } from 'lucide-react';
 import { apiUrl } from '../api';
 import { useDialog } from './Dialog';
 import ActivityLog from './ActivityLog';
@@ -23,6 +23,45 @@ function AdminPanel({ teams = [], tiles = [], onUpdate }) {
   const [eventStart, setEventStart] = useState('');
   const [eventEnd, setEventEnd] = useState('');
   const [newPin, setNewPin] = useState('');
+  const [preflight, setPreflight] = useState(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+
+  const runPreflight = async () => {
+    setPreflightLoading(true);
+    try {
+      const res = await fetch(apiUrl('/api/admin/preflight'));
+      const data = await res.json();
+      setPreflight(data);
+    } catch (e) {
+      await dialog.error('Kunne ikke køre pre-flight check');
+    } finally {
+      setPreflightLoading(false);
+    }
+  };
+
+  const backfillBaselines = async () => {
+    const ok = await dialog.confirm('Hent baseline fra WOM for alle spillere uden baseline?', {
+      title: 'Backfill baselines',
+      confirmText: 'Ja'
+    });
+    if (!ok) return;
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl('/api/admin/backfill-baselines'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_password: storedPassword })
+      });
+      const data = await res.json();
+      if (data.success) await dialog.success(`Baseline udfyldt for ${data.updated} spillere`);
+      else await dialog.error(data.error || 'Fejlede');
+      onUpdate?.();
+    } catch (e) {
+      await dialog.error(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem('adminPassword');
@@ -301,6 +340,57 @@ function AdminPanel({ teams = [], tiles = [], onUpdate }) {
             Log ud
           </button>
         </div>
+      </div>
+
+      {/* Pre-flight check */}
+      <div className="mb-8 p-4 bg-white bg-opacity-30 rounded-lg">
+        <h3 className="font-semibold text-osrs-brown mb-3 flex items-center gap-2">
+          <PlayCircle size={18} />
+          Pre-flight Check (kør før Start Bingo)
+        </h3>
+        <p className="text-sm text-osrs-border mb-3">
+          Verificerer at WOM kører, alle spillere findes, PIN er sat, og at hold/felter er klar.
+        </p>
+        <div className="flex gap-2 flex-wrap mb-3">
+          <button
+            onClick={runPreflight}
+            disabled={preflightLoading}
+            className="btn-osrs rounded text-sm flex items-center gap-2"
+          >
+            <RefreshCw size={14} className={preflightLoading ? 'animate-spin' : ''} />
+            {preflightLoading ? 'Tjekker...' : 'Kør Pre-flight'}
+          </button>
+          <button
+            onClick={backfillBaselines}
+            disabled={loading}
+            className="btn-osrs rounded text-sm flex items-center gap-2"
+          >
+            <Users size={14} />
+            Backfill manglende baselines
+          </button>
+        </div>
+        {preflight && (
+          <div className="space-y-1">
+            {preflight.checks.map((c) => (
+              <div
+                key={c.id}
+                className={`flex items-start gap-2 text-sm p-2 rounded ${
+                  c.ok ? 'bg-green-100 text-green-800' : c.critical ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                }`}
+              >
+                <span className="font-bold">{c.ok ? '✓' : '✗'}</span>
+                <div className="flex-1">
+                  <div>{c.label}</div>
+                  {c.detail && <div className="text-xs opacity-75">{c.detail}</div>}
+                </div>
+                {!c.critical && <span className="text-xs italic">valgfri</span>}
+              </div>
+            ))}
+            <div className={`mt-2 p-2 rounded font-semibold text-sm ${preflight.canStart ? 'bg-green-200 text-green-900' : 'bg-red-200 text-red-900'}`}>
+              {preflight.canStart ? '✓ Klar til at starte bingoen!' : '✗ Ret de røde punkter før du starter.'}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* PIN Management */}

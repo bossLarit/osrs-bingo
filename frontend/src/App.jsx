@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Trophy, Users, Settings, RefreshCw, MessageSquare, Shield, BookOpen, HelpCircle, BarChart3, Moon, Sun, Volume2, VolumeX, Share2 } from 'lucide-react';
+import { Trophy, Users, Settings, RefreshCw, MessageSquare, Shield, BookOpen, HelpCircle, BarChart3, Moon, Sun, Volume2, VolumeX, Share2, LayoutGrid } from 'lucide-react';
+import BoardsManager from './components/BoardsManager';
 import Scoreboard from './components/Scoreboard';
 import BingoBoard from './components/BingoBoard';
 import TeamManager from './components/TeamManager';
@@ -133,6 +134,9 @@ function App() {
 
   useEffect(() => {
     fetchData();
+    // Auto-poll every 60 seconds so multi-user views stay fresh
+    const poll = setInterval(fetchData, 60000);
+    return () => clearInterval(poll);
   }, []);
 
   // Calculate team scores
@@ -220,6 +224,7 @@ function App() {
     { id: 'bingo', label: 'Bingo Board', icon: Trophy },
     { id: 'teams', label: 'Hold', icon: Users },
     { id: 'tiles', label: 'Felter', icon: Settings },
+    { id: 'boards', label: 'Boards', icon: LayoutGrid },
     { id: 'proofs', label: 'Beviser', icon: MessageSquare },
     { id: 'stats', label: 'Statistik', icon: BarChart3 },
     { id: 'rules', label: 'Regler', icon: BookOpen },
@@ -357,6 +362,9 @@ function App() {
                 teams={teams}
                 onUpdate={fetchData}
               />
+            )}
+            {activeTab === 'boards' && (
+              <BoardsManager onUpdate={fetchData} />
             )}
             {activeTab === 'proofs' && (
               <ProofSubmit 

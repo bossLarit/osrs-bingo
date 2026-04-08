@@ -569,21 +569,65 @@ function TeamManager({ teams = [], onUpdate }) {
                 {teamPlayers.length === 0 ? (
                   <p className="text-osrs-border text-sm">Ingen spillere endnu</p>
                 ) : (
-                  teamPlayers.map(player => (
-                    <div 
-                      key={player.id}
-                      className="flex items-center justify-between p-2 bg-white bg-opacity-50 rounded"
-                    >
-                      <span className="text-osrs-brown">{player.username}</span>
-                      <button
-                        onClick={() => removePlayerFromTeam(player.id)}
-                        className="text-orange-500 hover:text-orange-700 p-1"
-                        title="Fjern fra hold"
+                  teamPlayers.map(player => {
+                    const hasBaseline = !!player.baseline_timestamp;
+                    const lastSync = player.last_wom_sync ? new Date(player.last_wom_sync) : null;
+                    const cooldownLeft = lastSync ? Math.max(0, 60 * 60 * 1000 - (Date.now() - lastSync.getTime())) : 0;
+                    const cooldownMin = Math.ceil(cooldownLeft / 60000);
+                    return (
+                      <div
+                        key={player.id}
+                        className="flex items-center justify-between p-2 bg-white bg-opacity-50 rounded gap-2"
                       >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ))
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span className="text-osrs-brown truncate">{player.username}</span>
+                          {!hasBaseline && (
+                            <span
+                              className="text-[10px] bg-yellow-300 text-yellow-900 px-1.5 py-0.5 rounded font-semibold"
+                              title="Mangler baseline - klik 'Hent baseline' for at fixe"
+                            >
+                              Ingen baseline
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {!hasBaseline && (
+                            <button
+                              onClick={async () => {
+                                const r = await fetch(apiUrl(`/api/players/${player.id}/baseline`), { method: 'POST' });
+                                if (r.ok) { await dialog.success('Baseline gemt'); fetchPlayers(); }
+                                else { const d = await r.json().catch(() => ({})); await dialog.error(d.error || 'Fejlede'); }
+                              }}
+                              className="text-xs btn-osrs rounded px-2 py-0.5"
+                              title="Hent baseline fra WOM nu"
+                            >
+                              Hent baseline
+                            </button>
+                          )}
+                          <button
+                            disabled={cooldownLeft > 0}
+                            onClick={async () => {
+                              const r = await fetch(apiUrl(`/api/players/${player.id}/sync`), { method: 'POST' });
+                              if (r.status === 429) { await dialog.error('På cooldown - WOM tillader kun 1 sync per time'); return; }
+                              if (r.ok) { await dialog.success('Synkroniseret'); fetchPlayers(); onUpdate?.(); }
+                              else { const d = await r.json().catch(() => ({})); await dialog.error(d.error || 'Fejlede'); }
+                            }}
+                            className="p-1 rounded text-osrs-brown hover:bg-osrs-gold hover:bg-opacity-30 disabled:opacity-40"
+                            title={cooldownLeft > 0 ? `Næste sync om ${cooldownMin} min` : 'Sync denne spiller fra WOM'}
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                          <button
+                            onClick={() => removePlayerFromTeam(player.id)}
+                            className="text-orange-500 hover:text-orange-700 p-1"
+                            title="Fjern fra hold"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
