@@ -14,7 +14,7 @@ const supabaseKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cC
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Default passwords from env
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '2005';
 const SITE_PIN = process.env.SITE_PIN || '1234';
 
 console.log('Connected to Supabase:', supabaseUrl);
