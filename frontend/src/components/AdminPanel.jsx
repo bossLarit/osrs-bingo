@@ -17,6 +17,7 @@ function AdminPanel({ teams = [], tiles = [], onUpdate }) {
   const [loading, setLoading] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(null);
   const [selectedTeam, setSelectedTeam] = useState('');
+  const [assignValue, setAssignValue] = useState(1);
   const [loginError, setLoginError] = useState('');
   const [config, setConfig] = useState({});
   const [showScheduler, setShowScheduler] = useState(false);
@@ -258,11 +259,13 @@ function AdminPanel({ teams = [], tiles = [], onUpdate }) {
         body: JSON.stringify({
           tile_id: tileId,
           team_id: parseInt(selectedTeam),
-          admin_password: storedPassword
+          admin_password: storedPassword,
+          value: assignValue
         })
       });
       setShowAssignModal(null);
       setSelectedTeam('');
+      setAssignValue(1);
       onUpdate();
     } catch (error) {
       console.error('Error assigning tile:', error);
@@ -579,6 +582,18 @@ function AdminPanel({ teams = [], tiles = [], onUpdate }) {
                 <option key={team.id} value={team.id}>{team.name}</option>
               ))}
             </select>
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-osrs-brown mb-1">
+                Antal (drops, kills, etc.)
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={assignValue}
+                onChange={(e) => setAssignValue(parseInt(e.target.value) || 0)}
+                className="input-osrs w-full rounded"
+              />
+            </div>
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setShowAssignModal(null)}

@@ -422,10 +422,10 @@ app.get('/api/proofs', async (req, res) => {
 
 app.post('/api/proofs', async (req, res) => {
   try {
-    const { tile_id, team_id, player_name, image_url, notes } = req.body;
-    
+    const { tile_id, team_id, player_name, image_url, notes, message } = req.body;
+
     const { data: proof, error } = await supabase.from('proofs')
-      .insert({ tile_id, team_id, player_name, image_url, notes, status: 'pending' })
+      .insert({ tile_id, team_id, player_name, image_url, notes: notes || message, status: 'pending' })
       .select()
       .single();
     
@@ -648,25 +648,37 @@ app.put('/api/admin/pin', async (req, res) => {
 
 app.post('/api/admin/assign-tile', async (req, res) => {
   try {
-    const { tile_id, team_id, admin_password } = req.body;
+    const { tile_id, team_id, admin_password, value } = req.body;
     const config = await getConfig();
-    
+
     if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
       return res.status(403).json({ error: 'Invalid admin password' });
     }
-    
-    // Remove existing completions for this tile
-    await supabase.from('progress').delete().eq('tile_id', tile_id).eq('completed', true);
-    
-    // Add new completion
-    await supabase.from('progress').insert({
-      tile_id,
-      team_id,
-      current_value: 1,
-      completed: true,
-      completed_at: new Date().toISOString()
-    });
-    
+
+    const currentValue = value || 1;
+    const completed = currentValue > 0;
+
+    // Upsert: update if exists, insert if not
+    const { data: existing } = await supabase.from('progress')
+      .select('*').eq('tile_id', tile_id).eq('team_id', team_id);
+
+    if (existing && existing.length > 0) {
+      await supabase.from('progress')
+        .update({ current_value: currentValue, completed, completed_at: completed ? new Date().toISOString() : null })
+        .eq('id', existing[0].id);
+    } else {
+      await supabase.from('progress')
+        .insert({ tile_id, team_id, current_value: currentValue, completed, completed_at: completed ? new Date().toISOString() : null });
+    }
+
+    // Remove other teams' completions for this tile
+    if (completed) {
+      await supabase.from('progress')
+        .update({ completed: false, completed_at: null })
+        .eq('tile_id', tile_id).eq('completed', true).neq('team_id', team_id);
+    }
+
+    await logActivity('TILE_ASSIGNED', `Felt ${tile_id} tildelt til hold ${team_id} (værdi: ${currentValue})`, 'Admin');
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1023,8 +1035,8 @@ app.post('/api/sync/progress', async (req, res) => {
         const contributions = teamPlayerContributions[team.id] || [];
 
         if (existing && existing.length > 0) {
-          // Don't overwrite target tiles already completed
-          if (!existing[0].completed || isCompetition) {
+          // Don't overwrite tiles already completed (manual assignments stay)
+          if (!existing[0].completed) {
             await supabase.from('progress')
               .update({
                 current_value: currentValue,
