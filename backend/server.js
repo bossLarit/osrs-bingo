@@ -947,86 +947,87 @@ app.post('/api/sync/progress', async (req, res) => {
     
     const results = [];
     
+    // Check if event has ended (for competition tile resolution)
+    const eventEnded = config.event_end && new Date(config.event_end) <= new Date();
+
     for (const tile of (tiles || [])) {
-      // Skip custom tiles (no automatic tracking)
-      if (tile.type === 'custom') continue;
-      
+      // Only auto-track tiles with a known WOM-trackable type and a valid metric
+      const trackableTypes = ['xp', 'level', 'experience', 'kills', 'kc'];
+      if (!trackableTypes.includes(tile.type) || !tile.metric) continue;
+
       const isCompetition = tile.target_value === 0 || tile.target_value === null;
       const teamProgress = {};
-      
+
       // Calculate progress for each team based on their players
       const teamPlayerContributions = {};
-      
+
       for (const team of (teams || [])) {
         const teamPlayers = (players || []).filter(p => p.team_id === team.id);
         let teamTotal = 0;
         const playerContributions = [];
-        
+
         for (const player of teamPlayers) {
           const current = player.current_stats;
           const baseline = player.baseline_stats;
-          
-          // Debug logging
-          console.log(`Player ${player.username}: current_stats exists: ${!!current}, baseline_stats exists: ${!!baseline}`);
-          
+
           if (!current || !baseline) {
             playerContributions.push({ username: player.username, contribution: 0 });
             continue;
           }
-          
+
           let gain = 0;
-          const metric = tile.metric?.toLowerCase();
-          
+          const metric = tile.metric.toLowerCase();
+
           if (tile.type === 'xp' || tile.type === 'level' || tile.type === 'experience') {
-            // Skill XP gain
             const currentXp = current?.skills?.[metric]?.experience || 0;
             const baselineXp = baseline?.skills?.[metric]?.experience || 0;
             gain = currentXp - baselineXp;
-            console.log(`  ${metric} XP: current=${currentXp}, baseline=${baselineXp}, gain=${gain}`);
           } else if (tile.type === 'kills' || tile.type === 'kc') {
-            // Boss KC gain
             const currentKc = current?.bosses?.[metric]?.kills || 0;
             const baselineKc = baseline?.bosses?.[metric]?.kills || 0;
             gain = currentKc - baselineKc;
           }
-          
+
           const playerGain = Math.max(0, gain);
           teamTotal += playerGain;
           playerContributions.push({ username: player.username, contribution: playerGain });
         }
-        
+
         teamProgress[team.id] = teamTotal;
         teamPlayerContributions[team.id] = playerContributions;
       }
-      
+
       // Update progress in database
       for (const team of (teams || [])) {
         const currentValue = teamProgress[team.id] || 0;
         let completed = false;
-        
+
         if (isCompetition) {
-          // Competition tile: highest value wins (determined at event end)
-          const maxValue = Math.max(...Object.values(teamProgress));
-          completed = currentValue > 0 && currentValue === maxValue;
+          // Competition tile: only resolve winner when event has ended
+          if (eventEnded) {
+            const maxValue = Math.max(...Object.values(teamProgress));
+            completed = currentValue > 0 && currentValue === maxValue;
+          }
+          // During event: just track current_value, don't mark completed
         } else {
           // Target tile: first to reach target wins
           completed = currentValue >= tile.target_value;
         }
-        
+
         // Upsert progress
         const { data: existing } = await supabase.from('progress')
           .select('*')
           .eq('tile_id', tile.id)
           .eq('team_id', team.id);
-        
+
         const contributions = teamPlayerContributions[team.id] || [];
-        
+
         if (existing && existing.length > 0) {
-          // Don't overwrite if already completed (unless competition)
+          // Don't overwrite target tiles already completed
           if (!existing[0].completed || isCompetition) {
             await supabase.from('progress')
-              .update({ 
-                current_value: currentValue, 
+              .update({
+                current_value: currentValue,
                 completed,
                 completed_at: completed ? new Date().toISOString() : null,
                 player_contributions: contributions
@@ -1035,17 +1036,17 @@ app.post('/api/sync/progress', async (req, res) => {
           }
         } else {
           await supabase.from('progress')
-            .insert({ 
-              tile_id: tile.id, 
-              team_id: team.id, 
-              current_value: currentValue, 
+            .insert({
+              tile_id: tile.id,
+              team_id: team.id,
+              current_value: currentValue,
               completed,
               completed_at: completed ? new Date().toISOString() : null,
               player_contributions: contributions
             });
         }
       }
-      
+
       results.push({ tile: tile.name, type: tile.type, isCompetition, teamProgress });
     }
     
