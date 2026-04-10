@@ -991,9 +991,16 @@ app.post('/api/sync/progress', async (req, res) => {
           const metric = tile.metric.toLowerCase();
 
           if (tile.type === 'xp' || tile.type === 'level' || tile.type === 'experience') {
-            const currentXp = current?.skills?.[metric]?.experience || 0;
-            const baselineXp = baseline?.skills?.[metric]?.experience || 0;
-            gain = currentXp - baselineXp;
+            if (!metric || metric === 'overall') {
+              // Total skill XP: sum all skills
+              const currentTotal = Object.values(current?.skills || {}).reduce((sum, s) => sum + (s.experience || 0), 0);
+              const baselineTotal = Object.values(baseline?.skills || {}).reduce((sum, s) => sum + (s.experience || 0), 0);
+              gain = currentTotal - baselineTotal;
+            } else {
+              const currentXp = current?.skills?.[metric]?.experience || 0;
+              const baselineXp = baseline?.skills?.[metric]?.experience || 0;
+              gain = currentXp - baselineXp;
+            }
           } else if (tile.type === 'kills' || tile.type === 'kc') {
             const currentKc = current?.bosses?.[metric]?.kills || 0;
             const baselineKc = baseline?.bosses?.[metric]?.kills || 0;
