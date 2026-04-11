@@ -1868,7 +1868,7 @@ app.post('/api/sheet-sync', async (req, res) => {
     const blueness = (t) => { const c = rgbFromHex(t.color); return c ? c.b - Math.max(c.r, c.g) : -Infinity; };
     const redness  = (t) => { const c = rgbFromHex(t.color); return c ? c.r - Math.max(c.g, c.b) : -Infinity; };
     const isLeftoverName = (n) => {
-      const s = String(n || '').trim().toLowerCase();
+      const s = String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
       return s === 'hold blå' || s === 'hold blaa' || s === 'hold rød' || s === 'hold roed';
     };
 
