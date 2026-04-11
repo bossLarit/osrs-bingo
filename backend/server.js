@@ -29,51 +29,14 @@ const SITE_PIN = process.env.SITE_PIN || '1234';
 //        - Header row with player names + the two "Hold X total" markers
 //        - Task rows: name in B, point value in C, per-player numbers,
 //          team total, points awarded
-//   3. Add/remove entries in `womTiles` if your WOM-driven tiles changed.
-//      Each entry is auto-created on the next sheet sync and populated from
-//      Wise Old Man data instead of the sheet row. The matching sheet row
-//      (by `sheetNameMatch` regex) is dropped to avoid duplicates.
-//   4. Run POST /api/bingo/start to set baselines from current WOM data.
-//   5. Click "Sync fra Sheet" in TileManager — sheet tiles get imported,
-//      WOM tiles get auto-created and populated.
+//   3. Click "Sync fra Sheet" in TileManager — all tiles, players and
+//      progress get imported from the sheet.
 // =========================================================================
 const BINGO_CONFIG = {
   // The public Google Sheet that the host fills in.
   // ID and GID are in the URL: docs.google.com/spreadsheets/d/<ID>/edit#gid=<GID>
   googleSheetId: '1mMFYiCGox0ejYNSjOGHQXVTsv9-JMGDVYYB_dcy3oIA',
   googleSheetGid: '0',
-
-  // WOM-driven tiles. Each entry:
-  //   - sheetNameMatch: regex matched against the task name in the sheet.
-  //                     Matching rows are SKIPPED during sheet import.
-  //   - tile:           the tile to ensure exists in the database. Created
-  //                     once on first sync if no tile with the same
-  //                     (type, metric) already exists. Existing rows are
-  //                     left alone so you can rename / re-point in the UI.
-  womTiles: [
-    {
-      sheetNameMatch: /mest\s+total\s+skill\s+xp/i,
-      tile: {
-        name: 'Mest total skill xp',
-        type: 'xp',
-        metric: 'overall',
-        target_value: 0,
-        points: 3,
-        description: 'Most total skill XP gained since bingo start (WOM)'
-      }
-    },
-    {
-      sheetNameMatch: /mest\s+ehb\s+gain/i,
-      tile: {
-        name: 'Mest EHB gain',
-        type: 'ehb',
-        metric: 'ehb',
-        target_value: 0,
-        points: 3,
-        description: 'Most EHB (Efficient Hours Bossing) gained since bingo start (WOM)'
-      }
-    }
-  ],
 
   // Defensive: team names that earlier sync runs may have auto-created.
   // Cleaned up on every sync and never selected as the blue/red role.
@@ -256,16 +219,11 @@ function parseBingoSheet(csvText) {
 
   // Task rows start at headerRowIdx + 2 (skipping the "Task,Point" sub-header)
   const looksLikeUrl = (s) => /https?:\/\/|www\.|\.(com|net|org|io)\b|temple|wiseoldman/i.test(s);
-  // Sheet rows whose name matches a WOM-driven tile (see BINGO_CONFIG.womTiles)
-  // are handled by auto-created WOM tiles and must NOT be imported from the sheet.
-  const isWomDrivenName = (s) =>
-    BINGO_CONFIG.womTiles.some(w => w.sheetNameMatch.test(s));
   const tasks = [];
   for (let r = headerRowIdx + 2; r < rows.length; r++) {
     const taskName = cell(r, 1);
     if (!taskName) continue; // separator/empty row
     if (looksLikeUrl(taskName)) continue; // player profile link rows at the bottom
-    if (isWomDrivenName(taskName)) continue; // handled by manually-created WOM tile
     const points = Math.round(parseSheetNumber(cell(r, 2)));
 
     const blueTotal = Math.round(parseSheetNumber(cell(r, blueTotalCol)));
@@ -1059,72 +1017,6 @@ function nextPlayerSyncMs(player) {
   return Math.max(0, SYNC_COOLDOWN_MS - (Date.now() - t));
 }
 
-// Synthesizes a baseline_stats blob by subtracting per-skill / per-boss / computed
-// gains from the current snapshot. This lets us reconstruct what the player looked
-// like at event_start without having to fetch a historical snapshot.
-// `current` is the latest WOM snapshot (player.current_stats / latestSnapshot.data).
-// `gained` is the `data` field from `/players/:username/gained?startDate=...`.
-function synthesizeBaselineFromGained(current, gained) {
-  if (!current) return null;
-  if (!gained) return current;
-
-  // Helper: extract a "gained" number from various WOM v2 shapes
-  const gNum = (g) => {
-    if (g == null) return 0;
-    if (typeof g === 'number') return g;
-    if (typeof g?.gained === 'number') return g.gained;
-    if (typeof g?.value?.gained === 'number') return g.value.gained;
-    return 0;
-  };
-
-  const baseline = JSON.parse(JSON.stringify(current));
-
-  // Skills: subtract experience gained per skill
-  if (baseline.skills && gained.skills) {
-    for (const [skillName, skillData] of Object.entries(baseline.skills)) {
-      const g = gained.skills[skillName];
-      if (!g || !skillData) continue;
-      const expGained = gNum(g.experience);
-      if (typeof skillData.experience === 'number') {
-        skillData.experience = Math.max(0, skillData.experience - expGained);
-      }
-    }
-  }
-
-  // Bosses: subtract kill counts
-  if (baseline.bosses && gained.bosses) {
-    for (const [bossName, bossData] of Object.entries(baseline.bosses)) {
-      const g = gained.bosses[bossName];
-      if (!g || !bossData) continue;
-      const killsGained = gNum(g.kills);
-      if (typeof bossData.kills === 'number') {
-        bossData.kills = Math.max(0, bossData.kills - killsGained);
-      }
-      const ehbGained = gNum(g.ehb);
-      if (typeof bossData.ehb === 'number') {
-        bossData.ehb = Math.max(0, bossData.ehb - ehbGained);
-      }
-    }
-  }
-
-  // Computed: subtract ehp/ehb
-  if (baseline.computed && gained.computed) {
-    for (const key of ['ehp', 'ehb']) {
-      const g = gained.computed[key];
-      const b = baseline.computed[key];
-      if (!g || !b) continue;
-      const v = gNum(g.value ?? g);
-      if (typeof b.value === 'number') {
-        b.value = Math.max(0, b.value - v);
-      } else if (typeof b === 'number') {
-        baseline.computed[key] = Math.max(0, b - v);
-      }
-    }
-  }
-
-  return baseline;
-}
-
 async function fetchAndStorePlayerWOM(player) {
   // POST to force WOM refresh, then GET fresh data
   await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`, {
@@ -1283,7 +1175,7 @@ async function recomputeWomProgress() {
 
   for (const tile of (tiles || [])) {
     // Only auto-track tiles with a known WOM-trackable type and a valid metric
-    const trackableTypes = ['xp', 'level', 'experience', 'kills', 'kc', 'ehb'];
+    const trackableTypes = ['xp', 'level', 'experience', 'kills', 'kc'];
     if (!trackableTypes.includes(tile.type) || !tile.metric) continue;
 
     const isCompetition = tile.target_value === 0 || tile.target_value === null;
@@ -1324,31 +1216,6 @@ async function recomputeWomProgress() {
           const currentKc = current?.bosses?.[metric]?.kills || 0;
           const baselineKc = baseline?.bosses?.[metric]?.kills || 0;
           gain = currentKc - baselineKc;
-        } else if (tile.type === 'ehb') {
-          // EHB can live at various paths depending on WOM API version / snapshot age.
-          // Try the common ones in order. Also sum boss-level ehb as a last resort.
-          const extractEhb = (snap) => {
-            if (!snap) return 0;
-            // v2 API: latestSnapshot.data.computed.ehb.value
-            if (typeof snap?.computed?.ehb?.value === 'number') return snap.computed.ehb.value;
-            // Some snapshots store it as a plain number under computed
-            if (typeof snap?.computed?.ehb === 'number') return snap.computed.ehb;
-            // Top-level fallback
-            if (typeof snap?.ehb?.value === 'number') return snap.ehb.value;
-            if (typeof snap?.ehb === 'number') return snap.ehb;
-            // Fallback: sum per-boss ehb
-            const bosses = snap?.bosses;
-            if (bosses && typeof bosses === 'object') {
-              let sum = 0;
-              for (const b of Object.values(bosses)) {
-                if (typeof b?.ehb === 'number') sum += b.ehb;
-                else if (typeof b?.ehb?.value === 'number') sum += b.ehb.value;
-              }
-              if (sum > 0) return sum;
-            }
-            return 0;
-          };
-          gain = extractEhb(current) - extractEhb(baseline);
         }
 
         const playerGain = Math.max(0, gain);
@@ -2136,82 +2003,10 @@ app.post('/api/sheet-sync', async (req, res) => {
       if (error) throw new Error(`players delete: ${error.message}`);
     }
 
-    // 3b. Refresh WOM stats for every player AND re-anchor baseline_stats to
-    //     config.event_start using WOM's /gained endpoint. This guarantees that
-    //     "gain since bingo start" is computed against the actual event start
-    //     time, regardless of when /api/bingo/start was originally run or
-    //     whether new players were added later via sheet-sync.
-    //     Bypasses the per-player cooldown since this is an admin-triggered sync.
-    const womDiagnostics = [];
+    // 4. Wipe all tiles before reimport (cascades to progress, proofs, tile_votes)
     {
-      const config = await getConfig();
-      const eventStart = config.event_start;
-      const { data: playersForWom } = await supabase.from('players').select('*');
-      for (const p of (playersForWom || [])) {
-        const diag = { username: p.username, refreshed: false, baseline_anchored: false, error: null };
-        try {
-          // Fetch fresh WOM data (sets current_stats)
-          const result = await fetchAndStorePlayerWOM(p);
-          if (!result.ok) {
-            diag.error = result.error || 'WOM fetch failed';
-            womDiagnostics.push(diag);
-            continue;
-          }
-          diag.refreshed = true;
-          const freshCurrent = result.data?.latestSnapshot?.data;
-
-          // Re-anchor baseline to event_start every sync. WOM's /gained endpoint
-          // gives us the actual gains since startDate; baseline = current - gains.
-          if (eventStart && freshCurrent) {
-            try {
-              const gainedUrl = `https://api.wiseoldman.net/v2/players/${encodeURIComponent(p.username)}/gained?startDate=${encodeURIComponent(eventStart)}`;
-              const gainedResp = await fetch(gainedUrl);
-              if (gainedResp.ok) {
-                const gainedJson = await gainedResp.json();
-                const baseline = synthesizeBaselineFromGained(freshCurrent, gainedJson?.data);
-                await supabase.from('players')
-                  .update({ baseline_stats: baseline, baseline_timestamp: eventStart })
-                  .eq('id', p.id);
-                diag.baseline_anchored = 'from_gained';
-              } else if (!p.baseline_stats) {
-                // Only fall back to "baseline = current" if there was nothing at all.
-                // Don't overwrite an existing (presumably correct) baseline with current.
-                await supabase.from('players')
-                  .update({ baseline_stats: freshCurrent, baseline_timestamp: new Date().toISOString() })
-                  .eq('id', p.id);
-                diag.baseline_anchored = 'from_current_fallback';
-              } else {
-                diag.baseline_anchored = 'kept_existing';
-                diag.error = `gained endpoint returned ${gainedResp.status}`;
-              }
-            } catch (e) {
-              diag.error = `baseline anchor: ${e.message}`;
-            }
-          } else if (!eventStart) {
-            diag.error = 'event_start not set — run /api/bingo/start first';
-          }
-        } catch (e) {
-          diag.error = e.message;
-        }
-        womDiagnostics.push(diag);
-        await new Promise(r => setTimeout(r, 250)); // light rate-limit between players
-      }
-    }
-
-    // 4. Selective wipe: delete sheet-derived tiles only, preserve WOM-tracked tiles
-    //    so manually-created xp/ehb/kc/etc tiles (and their progress/proofs/votes) survive.
-    {
-      const { data: existingTilesForWipe } = await supabase.from('tiles').select('id, type, metric');
-      const isWomTracked = (t) =>
-        ['xp', 'level', 'experience', 'kills', 'kc', 'ehb'].includes(t.type) &&
-        t.metric && String(t.metric).trim() !== '';
-      const idsToDelete = (existingTilesForWipe || [])
-        .filter(t => !isWomTracked(t))
-        .map(t => t.id);
-      if (idsToDelete.length > 0) {
-        const { error } = await supabase.from('tiles').delete().in('id', idsToDelete);
-        if (error) throw new Error(`tiles wipe: ${error.message}`);
-      }
+      const { error } = await supabase.from('tiles').delete().neq('id', 0);
+      if (error) throw new Error(`tiles wipe: ${error.message}`);
     }
 
     // 5. Insert tiles in bulk and capture new ids
@@ -2271,50 +2066,7 @@ app.post('/api/sheet-sync', async (req, res) => {
       if (progErr) throw new Error(`progress insert: ${progErr.message}`);
     }
 
-    // 7. Ensure WOM-driven tiles from BINGO_CONFIG.womTiles exist. Match existing
-    //    tiles by (type, metric) so user-renamed/repointed rows aren't duplicated.
-    const womTilesCreated = [];
-    {
-      const { data: allTilesNow } = await supabase.from('tiles').select('id, type, metric');
-      const existingByTypeMetric = new Map(
-        (allTilesNow || []).map(t => [`${t.type}|${String(t.metric || '').toLowerCase()}`, t])
-      );
-      const sheetMaxPosition = sheet.tasks.length;
-      const womInserts = [];
-      BINGO_CONFIG.womTiles.forEach((w, idx) => {
-        const key = `${w.tile.type}|${String(w.tile.metric || '').toLowerCase()}`;
-        if (existingByTypeMetric.has(key)) return;
-        womInserts.push({
-          name: w.tile.name,
-          type: w.tile.type,
-          metric: w.tile.metric,
-          target_value: w.tile.target_value ?? 0,
-          points: w.tile.points ?? 1,
-          description: w.tile.description || 'WOM-driven tile',
-          position: sheetMaxPosition + idx
-        });
-      });
-      if (womInserts.length > 0) {
-        const { data: createdWom, error: womErr } = await supabase.from('tiles')
-          .insert(womInserts)
-          .select();
-        if (womErr) throw new Error(`wom tiles insert: ${womErr.message}`);
-        womTilesCreated.push(...(createdWom || []).map(t => t.name));
-      }
-    }
-
-    // 8. Auto-recompute WOM progress so xp/ehb tiles update immediately.
-    //    Don't fail the sheet sync if this throws — sheet data is the primary thing.
-    let womResult = { skipped: true };
-    let womError = null;
-    try {
-      womResult = await recomputeWomProgress();
-    } catch (e) {
-      console.error('WOM progress recompute after sheet sync failed:', e);
-      womError = e.message;
-    }
-
-    // 9. Log + respond
+    // 7. Log + respond
     await logActivity(
       'SHEET_SYNC',
       `Synkroniseret ${sheet.tasks.length} felter og ${sheet.bluePlayers.length + sheet.redPlayers.length} spillere fra Google Sheet`,
@@ -2329,11 +2081,7 @@ app.post('/api/sheet-sync', async (req, res) => {
       ],
       tiles_synced: sheet.tasks.length,
       players_synced: sheet.bluePlayers.length + sheet.redPlayers.length,
-      progress_rows: progressRows.length,
-      wom_tiles_created: womTilesCreated,
-      wom_progress_synced: !womResult.skipped && !womError,
-      wom_progress_error: womError,
-      wom_player_diagnostics: womDiagnostics
+      progress_rows: progressRows.length
     });
   } catch (error) {
     console.error('Sheet sync error:', error);

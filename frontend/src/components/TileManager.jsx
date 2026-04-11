@@ -8,7 +8,6 @@ const TILE_TYPES = [
   { value: 'kc', label: 'Kill Count' },
   { value: 'level', label: 'Skill Level' },
   { value: 'xp', label: 'Experience' },
-  { value: 'ehb', label: 'EHB Gain (WOM)' },
   { value: 'collection', label: 'Collection (Konkurrence)' },
   { value: 'custom', label: 'Custom' }
 ];
