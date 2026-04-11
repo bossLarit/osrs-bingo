@@ -2041,8 +2041,8 @@ app.post('/api/sheet-sync', async (req, res) => {
     res.json({
       success: true,
       teams: [
-        { id: teamIdByName[blueName], name: blueName },
-        { id: teamIdByName[redName], name: redName }
+        { id: blueTeamId, name: blueTeam.name },
+        { id: redTeamId, name: redTeam.name }
       ],
       tiles_synced: sheet.tasks.length,
       players_synced: sheet.bluePlayers.length + sheet.redPlayers.length,
