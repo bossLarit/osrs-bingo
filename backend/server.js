@@ -1059,6 +1059,72 @@ function nextPlayerSyncMs(player) {
   return Math.max(0, SYNC_COOLDOWN_MS - (Date.now() - t));
 }
 
+// Synthesizes a baseline_stats blob by subtracting per-skill / per-boss / computed
+// gains from the current snapshot. This lets us reconstruct what the player looked
+// like at event_start without having to fetch a historical snapshot.
+// `current` is the latest WOM snapshot (player.current_stats / latestSnapshot.data).
+// `gained` is the `data` field from `/players/:username/gained?startDate=...`.
+function synthesizeBaselineFromGained(current, gained) {
+  if (!current) return null;
+  if (!gained) return current;
+
+  // Helper: extract a "gained" number from various WOM v2 shapes
+  const gNum = (g) => {
+    if (g == null) return 0;
+    if (typeof g === 'number') return g;
+    if (typeof g?.gained === 'number') return g.gained;
+    if (typeof g?.value?.gained === 'number') return g.value.gained;
+    return 0;
+  };
+
+  const baseline = JSON.parse(JSON.stringify(current));
+
+  // Skills: subtract experience gained per skill
+  if (baseline.skills && gained.skills) {
+    for (const [skillName, skillData] of Object.entries(baseline.skills)) {
+      const g = gained.skills[skillName];
+      if (!g || !skillData) continue;
+      const expGained = gNum(g.experience);
+      if (typeof skillData.experience === 'number') {
+        skillData.experience = Math.max(0, skillData.experience - expGained);
+      }
+    }
+  }
+
+  // Bosses: subtract kill counts
+  if (baseline.bosses && gained.bosses) {
+    for (const [bossName, bossData] of Object.entries(baseline.bosses)) {
+      const g = gained.bosses[bossName];
+      if (!g || !bossData) continue;
+      const killsGained = gNum(g.kills);
+      if (typeof bossData.kills === 'number') {
+        bossData.kills = Math.max(0, bossData.kills - killsGained);
+      }
+      const ehbGained = gNum(g.ehb);
+      if (typeof bossData.ehb === 'number') {
+        bossData.ehb = Math.max(0, bossData.ehb - ehbGained);
+      }
+    }
+  }
+
+  // Computed: subtract ehp/ehb
+  if (baseline.computed && gained.computed) {
+    for (const key of ['ehp', 'ehb']) {
+      const g = gained.computed[key];
+      const b = baseline.computed[key];
+      if (!g || !b) continue;
+      const v = gNum(g.value ?? g);
+      if (typeof b.value === 'number') {
+        b.value = Math.max(0, b.value - v);
+      } else if (typeof b === 'number') {
+        baseline.computed[key] = Math.max(0, b - v);
+      }
+    }
+  }
+
+  return baseline;
+}
+
 async function fetchAndStorePlayerWOM(player) {
   // POST to force WOM refresh, then GET fresh data
   await fetch(`https://api.wiseoldman.net/v2/players/${encodeURIComponent(player.username)}`, {
@@ -1259,11 +1325,30 @@ async function recomputeWomProgress() {
           const baselineKc = baseline?.bosses?.[metric]?.kills || 0;
           gain = currentKc - baselineKc;
         } else if (tile.type === 'ehb') {
-          // WOM stores EHB at latestSnapshot.data.computed.ehb.value (decimal hours).
-          // current_value is INTEGER so this floors via Math.max + integer cast.
-          const currentEhb = current?.computed?.ehb?.value || 0;
-          const baselineEhb = baseline?.computed?.ehb?.value || 0;
-          gain = currentEhb - baselineEhb;
+          // EHB can live at various paths depending on WOM API version / snapshot age.
+          // Try the common ones in order. Also sum boss-level ehb as a last resort.
+          const extractEhb = (snap) => {
+            if (!snap) return 0;
+            // v2 API: latestSnapshot.data.computed.ehb.value
+            if (typeof snap?.computed?.ehb?.value === 'number') return snap.computed.ehb.value;
+            // Some snapshots store it as a plain number under computed
+            if (typeof snap?.computed?.ehb === 'number') return snap.computed.ehb;
+            // Top-level fallback
+            if (typeof snap?.ehb?.value === 'number') return snap.ehb.value;
+            if (typeof snap?.ehb === 'number') return snap.ehb;
+            // Fallback: sum per-boss ehb
+            const bosses = snap?.bosses;
+            if (bosses && typeof bosses === 'object') {
+              let sum = 0;
+              for (const b of Object.values(bosses)) {
+                if (typeof b?.ehb === 'number') sum += b.ehb;
+                else if (typeof b?.ehb?.value === 'number') sum += b.ehb.value;
+              }
+              if (sum > 0) return sum;
+            }
+            return 0;
+          };
+          gain = extractEhb(current) - extractEhb(baseline);
         }
 
         const playerGain = Math.max(0, gain);
@@ -2051,6 +2136,68 @@ app.post('/api/sheet-sync', async (req, res) => {
       if (error) throw new Error(`players delete: ${error.message}`);
     }
 
+    // 3b. Refresh WOM stats for every player AND re-anchor baseline_stats to
+    //     config.event_start using WOM's /gained endpoint. This guarantees that
+    //     "gain since bingo start" is computed against the actual event start
+    //     time, regardless of when /api/bingo/start was originally run or
+    //     whether new players were added later via sheet-sync.
+    //     Bypasses the per-player cooldown since this is an admin-triggered sync.
+    const womDiagnostics = [];
+    {
+      const config = await getConfig();
+      const eventStart = config.event_start;
+      const { data: playersForWom } = await supabase.from('players').select('*');
+      for (const p of (playersForWom || [])) {
+        const diag = { username: p.username, refreshed: false, baseline_anchored: false, error: null };
+        try {
+          // Fetch fresh WOM data (sets current_stats)
+          const result = await fetchAndStorePlayerWOM(p);
+          if (!result.ok) {
+            diag.error = result.error || 'WOM fetch failed';
+            womDiagnostics.push(diag);
+            continue;
+          }
+          diag.refreshed = true;
+          const freshCurrent = result.data?.latestSnapshot?.data;
+
+          // Re-anchor baseline to event_start every sync. WOM's /gained endpoint
+          // gives us the actual gains since startDate; baseline = current - gains.
+          if (eventStart && freshCurrent) {
+            try {
+              const gainedUrl = `https://api.wiseoldman.net/v2/players/${encodeURIComponent(p.username)}/gained?startDate=${encodeURIComponent(eventStart)}`;
+              const gainedResp = await fetch(gainedUrl);
+              if (gainedResp.ok) {
+                const gainedJson = await gainedResp.json();
+                const baseline = synthesizeBaselineFromGained(freshCurrent, gainedJson?.data);
+                await supabase.from('players')
+                  .update({ baseline_stats: baseline, baseline_timestamp: eventStart })
+                  .eq('id', p.id);
+                diag.baseline_anchored = 'from_gained';
+              } else if (!p.baseline_stats) {
+                // Only fall back to "baseline = current" if there was nothing at all.
+                // Don't overwrite an existing (presumably correct) baseline with current.
+                await supabase.from('players')
+                  .update({ baseline_stats: freshCurrent, baseline_timestamp: new Date().toISOString() })
+                  .eq('id', p.id);
+                diag.baseline_anchored = 'from_current_fallback';
+              } else {
+                diag.baseline_anchored = 'kept_existing';
+                diag.error = `gained endpoint returned ${gainedResp.status}`;
+              }
+            } catch (e) {
+              diag.error = `baseline anchor: ${e.message}`;
+            }
+          } else if (!eventStart) {
+            diag.error = 'event_start not set — run /api/bingo/start first';
+          }
+        } catch (e) {
+          diag.error = e.message;
+        }
+        womDiagnostics.push(diag);
+        await new Promise(r => setTimeout(r, 250)); // light rate-limit between players
+      }
+    }
+
     // 4. Selective wipe: delete sheet-derived tiles only, preserve WOM-tracked tiles
     //    so manually-created xp/ehb/kc/etc tiles (and their progress/proofs/votes) survive.
     {
@@ -2185,7 +2332,8 @@ app.post('/api/sheet-sync', async (req, res) => {
       progress_rows: progressRows.length,
       wom_tiles_created: womTilesCreated,
       wom_progress_synced: !womResult.skipped && !womError,
-      wom_progress_error: womError
+      wom_progress_error: womError,
+      wom_player_diagnostics: womDiagnostics
     });
   } catch (error) {
     console.error('Sheet sync error:', error);
