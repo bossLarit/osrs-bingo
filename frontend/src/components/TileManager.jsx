@@ -183,6 +183,7 @@ function TileManager({ tiles = [], teams = [], onUpdate }) {
   const [showBoardPicker, setShowBoardPicker] = useState(false);
   const [savedBoards, setSavedBoards] = useState([]);
   const [boardsLoading, setBoardsLoading] = useState(false);
+  const [sheetSyncing, setSheetSyncing] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -380,6 +381,38 @@ function TileManager({ tiles = [], teams = [], onUpdate }) {
     }
   };
 
+  const syncFromGoogleSheet = async () => {
+    const adminPassword = localStorage.getItem('adminPassword');
+    if (!adminPassword) {
+      await dialog.error('Du skal være logget ind som admin.');
+      return;
+    }
+    const ok = await dialog.confirm(
+      'Dette henter ALT fra Google Sheet og overskriver felter, fremskridt, proofs og votes. Fortsæt?',
+      { title: 'Synkroniser fra Google Sheet', confirmText: 'Ja, synkroniser' }
+    );
+    if (!ok) return;
+
+    setSheetSyncing(true);
+    try {
+      const res = await fetch(apiUrl('/api/sheet-sync'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_password: adminPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync fejlede');
+      await dialog.success(
+        `Synkroniseret! ${data.tiles_synced} felter, ${data.players_synced} spillere.`
+      );
+      onUpdate();
+    } catch (e) {
+      await dialog.error(`Sheet-sync fejlede: ${e.message}`);
+    } finally {
+      setSheetSyncing(false);
+    }
+  };
+
   const saveBoard = async () => {
     const name = await dialog.prompt('Giv dette board et navn:', {
       title: 'Gem board',
@@ -473,6 +506,15 @@ function TileManager({ tiles = [], teams = [], onUpdate }) {
           >
             <Download size={18} />
             Indlæs Board
+          </button>
+          <button
+            onClick={syncFromGoogleSheet}
+            disabled={sheetSyncing || loading}
+            className="btn-osrs flex items-center gap-2 rounded"
+            title="Hent felter, spillere og fremskridt fra Google Sheet"
+          >
+            <RefreshCw size={18} className={sheetSyncing ? 'animate-spin' : ''} />
+            {sheetSyncing ? 'Synkroniserer...' : 'Sync fra Sheet'}
           </button>
           {safeTiles.length > 0 && (
             <button
