@@ -191,10 +191,12 @@ function parseBingoSheet(csvText) {
   if (redPlayers.length === 0) throw new Error('No red players found in header row');
 
   // Task rows start at headerRowIdx + 2 (skipping the "Task,Point" sub-header)
+  const looksLikeUrl = (s) => /https?:\/\/|www\.|\.(com|net|org|io)\b|temple|wiseoldman/i.test(s);
   const tasks = [];
   for (let r = headerRowIdx + 2; r < rows.length; r++) {
     const taskName = cell(r, 1);
     if (!taskName) continue; // separator/empty row
+    if (looksLikeUrl(taskName)) continue; // player profile link rows at the bottom
     const points = Math.round(parseSheetNumber(cell(r, 2)));
 
     const blueTotal = Math.round(parseSheetNumber(cell(r, blueTotalCol)));
@@ -1852,32 +1854,87 @@ app.post('/api/sheet-sync', async (req, res) => {
 
     const [blueName, redName] = sheet.teamNames;
 
-    // 2. Reconcile teams (preserve color/logo on existing rows)
+    // 2. Map sheet's blue/red roles to EXISTING teams by color.
+    //    Do not auto-create or rename teams when real ones already exist.
+    //    Cleanup leftover "Hold blå"/"Hold Rød" teams from earlier sync runs.
     const { data: existingTeams } = await supabase.from('teams').select('*');
-    const findTeam = (name) => (existingTeams || []).find(
-      t => String(t.name).trim().toLowerCase() === String(name).trim().toLowerCase()
-    );
+    const allTeams = existingTeams || [];
 
-    const teamIdByName = {};
-    for (const [idx, name] of [blueName, redName].entries()) {
-      const existing = findTeam(name);
-      if (existing) {
-        teamIdByName[name] = existing.id;
-      } else {
-        const defaultColor = idx === 0 ? '#3b82f6' : '#ef4444';
-        const { data: created, error } = await supabase.from('teams')
-          .insert({ name, color: defaultColor })
-          .select()
-          .single();
-        if (error) throw new Error(`teams insert: ${error.message}`);
-        teamIdByName[name] = created.id;
+    const rgbFromHex = (hex) => {
+      const m = String(hex || '').replace('#', '').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+      if (!m) return null;
+      return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+    };
+    const blueness = (t) => { const c = rgbFromHex(t.color); return c ? c.b - Math.max(c.r, c.g) : -Infinity; };
+    const redness  = (t) => { const c = rgbFromHex(t.color); return c ? c.r - Math.max(c.g, c.b) : -Infinity; };
+    const isLeftoverName = (n) => {
+      const s = String(n || '').trim().toLowerCase();
+      return s === 'hold blå' || s === 'hold blaa' || s === 'hold rød' || s === 'hold roed';
+    };
+
+    // Prefer non-leftover teams when picking blue/red roles
+    const realTeams = allTeams.filter(t => !isLeftoverName(t.name));
+    const candidatePool = realTeams.length >= 2 ? realTeams : allTeams;
+
+    let blueTeam = null;
+    let redTeam = null;
+    if (candidatePool.length > 0) {
+      const sortedByBlue = [...candidatePool].sort((a, b) => blueness(b) - blueness(a));
+      const sortedByRed  = [...candidatePool].sort((a, b) => redness(b)  - redness(a));
+      blueTeam = sortedByBlue[0] && blueness(sortedByBlue[0]) > 0 ? sortedByBlue[0] : null;
+      redTeam  = sortedByRed[0]  && redness(sortedByRed[0])  > 0 ? sortedByRed[0]  : null;
+      // If the same team scored highest for both, demote the weaker role to its second-best
+      if (blueTeam && redTeam && blueTeam.id === redTeam.id) {
+        if (blueness(blueTeam) >= redness(redTeam)) {
+          redTeam = sortedByRed[1] || null;
+        } else {
+          blueTeam = sortedByBlue[1] || null;
+        }
       }
+      // Last-ditch fallback: if color detection failed but two teams exist, just take the
+      // first two by id and assume insertion order = blue, red.
+      if ((!blueTeam || !redTeam) && candidatePool.length >= 2) {
+        const byId = [...candidatePool].sort((a, b) => a.id - b.id);
+        blueTeam = blueTeam || byId[0];
+        redTeam  = redTeam  || byId.find(t => t.id !== blueTeam.id) || byId[1];
+      }
+    }
+
+    // Only create teams if there really aren't any to map to
+    if (!blueTeam) {
+      const { data: created, error } = await supabase.from('teams')
+        .insert({ name: blueName, color: '#3b82f6' })
+        .select()
+        .single();
+      if (error) throw new Error(`teams insert blue: ${error.message}`);
+      blueTeam = created;
+    }
+    if (!redTeam) {
+      const { data: created, error } = await supabase.from('teams')
+        .insert({ name: redName, color: '#ef4444' })
+        .select()
+        .single();
+      if (error) throw new Error(`teams insert red: ${error.message}`);
+      redTeam = created;
+    }
+
+    const blueTeamId = blueTeam.id;
+    const redTeamId = redTeam.id;
+
+    // Cleanup: delete leftover "Hold blå"/"Hold Rød" teams created by earlier sync runs,
+    // but never delete the team we just selected for the blue/red role.
+    const leftoverIds = allTeams
+      .filter(t => isLeftoverName(t.name) && t.id !== blueTeamId && t.id !== redTeamId)
+      .map(t => t.id);
+    if (leftoverIds.length > 0) {
+      const { error } = await supabase.from('teams').delete().in('id', leftoverIds);
+      if (error) throw new Error(`teams cleanup: ${error.message}`);
     }
 
     // 3. Reconcile players (preserve WOM fields, only touch team_id)
     const desired = [
-      ...sheet.bluePlayers.map(u => ({ username: u, team_id: teamIdByName[blueName] })),
-      ...sheet.redPlayers.map(u => ({ username: u, team_id: teamIdByName[redName] }))
+      ...sheet.bluePlayers.map(u => ({ username: u, team_id: blueTeamId })),
+      ...sheet.redPlayers.map(u => ({ username: u, team_id: redTeamId }))
     ];
     const desiredKeys = new Set(desired.map(d => d.username.toLowerCase()));
 
