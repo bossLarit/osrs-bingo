@@ -17,6 +17,10 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '2005';
 const SITE_PIN = process.env.SITE_PIN || '1234';
 
+// Google Sheet sync config
+const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID || '1mMFYiCGox0ejYNSjOGHQXVTsv9-JMGDVYYB_dcy3oIA';
+const GOOGLE_SHEET_GID = process.env.GOOGLE_SHEET_GID || '0';
+
 console.log('Connected to Supabase:', supabaseUrl);
 
 // ============ HELPER FUNCTIONS ============
@@ -45,6 +49,185 @@ async function getConfig() {
   }
   
   return data[0];
+}
+
+// ============ GOOGLE SHEET HELPERS ============
+
+// Minimal quoted-CSV parser. Handles "" as escaped quote inside quoted fields
+// and treats CR/LF outside quotes as row terminators. Returns string[][].
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        cell += ch;
+      }
+    } else {
+      if (ch === '"') { inQuotes = true; }
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\r') { /* skip - handled by \n */ }
+      else if (ch === '\n') { row.push(cell); cell = ''; rows.push(row); row = []; }
+      else { cell += ch; }
+    }
+  }
+  // Trailing cell / row
+  if (cell.length > 0 || row.length > 0) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+// Tolerant number parser for European-formatted numbers in the sheet.
+function parseSheetNumber(raw) {
+  if (raw === null || raw === undefined) return 0;
+  const s = String(raw).trim();
+  if (s === '') return 0;
+  if (/^0+[.,]0+$/.test(s)) return 0; // "00.00" placeholder
+  const hasDot = s.includes('.');
+  const hasComma = s.includes(',');
+  const dotCount = (s.match(/\./g) || []).length;
+  const commaCount = (s.match(/,/g) || []).length;
+  let normalized;
+  if (hasDot && !hasComma) {
+    if (dotCount > 1) {
+      // 1.825.205 - thousands separator
+      normalized = s.replace(/\./g, '');
+    } else {
+      // Could be 1.5 (decimal) or 1.000 (thousands). Assume decimal.
+      normalized = s;
+    }
+  } else if (hasComma && !hasDot) {
+    if (commaCount > 1) {
+      // 1,234,567 - thousands
+      normalized = s.replace(/,/g, '');
+    } else {
+      // 1,03 - decimal
+      normalized = s.replace(',', '.');
+    }
+  } else if (hasDot && hasComma) {
+    // Mixed - assume European format (1.234,56)
+    normalized = s.replace(/\./g, '').replace(',', '.');
+  } else {
+    normalized = s;
+  }
+  const n = parseFloat(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function fetchSheetCsv() {
+  const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/export?format=csv&gid=${GOOGLE_SHEET_GID}`;
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) {
+    throw new Error(`Google Sheet fetch failed: HTTP ${res.status}`);
+  }
+  return await res.text();
+}
+
+// Parses the bingo sheet CSV into a normalized structure.
+// Throws with a descriptive error if structure is invalid (caller should NOT touch DB).
+function parseBingoSheet(csvText) {
+  const rows = parseCsv(csvText);
+  if (rows.length < 8) throw new Error('Sheet has too few rows');
+
+  const cell = (r, c) => (rows[r] && rows[r][c] !== undefined ? String(rows[r][c]).trim() : '');
+
+  // Team names from rows 3 and 4 (0-indexed), col 1
+  const blueName = cell(3, 1) || 'Hold Blå';
+  const redName = cell(4, 1) || 'Hold Rød';
+
+  // Find header row by scanning rows 5-9 for "Hold Blå total" sentinel
+  let headerRowIdx = -1;
+  let blueTotalCol = -1;
+  for (let r = 5; r <= 9 && r < rows.length; r++) {
+    const cells = rows[r] || [];
+    for (let c = 0; c < cells.length; c++) {
+      if (String(cells[c]).trim().toLowerCase() === 'hold blå total') {
+        headerRowIdx = r;
+        blueTotalCol = c;
+        break;
+      }
+    }
+    if (headerRowIdx !== -1) break;
+  }
+  if (headerRowIdx === -1) throw new Error('Could not find header row (missing "Hold Blå total")');
+
+  const bluePointsCol = blueTotalCol + 1;
+  const redPointsCol = blueTotalCol + 2;
+
+  // Find redTotalCol in same header row
+  let redTotalCol = -1;
+  const headerRow = rows[headerRowIdx];
+  for (let c = redPointsCol + 1; c < headerRow.length; c++) {
+    if (String(headerRow[c]).trim().toLowerCase() === 'hold rød total') {
+      redTotalCol = c;
+      break;
+    }
+  }
+  if (redTotalCol === -1) throw new Error('Could not find "Hold Rød total" column');
+
+  // Blue player columns: scan left from blueTotalCol back until first empty header cell
+  const bluePlayerCols = [];
+  for (let c = blueTotalCol - 1; c >= 0; c--) {
+    const name = String(headerRow[c] || '').trim();
+    if (!name) break;
+    bluePlayerCols.unshift(c);
+  }
+  const bluePlayers = bluePlayerCols.map(c => String(headerRow[c]).trim());
+
+  // Red player columns: strictly between redPointsCol and redTotalCol
+  const redPlayerCols = [];
+  for (let c = redPointsCol + 1; c < redTotalCol; c++) {
+    const name = String(headerRow[c] || '').trim();
+    if (name) redPlayerCols.push(c);
+  }
+  const redPlayers = redPlayerCols.map(c => String(headerRow[c]).trim());
+
+  if (bluePlayers.length === 0) throw new Error('No blue players found in header row');
+  if (redPlayers.length === 0) throw new Error('No red players found in header row');
+
+  // Task rows start at headerRowIdx + 2 (skipping the "Task,Point" sub-header)
+  const tasks = [];
+  for (let r = headerRowIdx + 2; r < rows.length; r++) {
+    const taskName = cell(r, 1);
+    if (!taskName) continue; // separator/empty row
+    const points = Math.round(parseSheetNumber(cell(r, 2)));
+
+    const blueTotal = Math.round(parseSheetNumber(cell(r, blueTotalCol)));
+    const blueAwarded = Math.round(parseSheetNumber(cell(r, bluePointsCol)));
+    const blueContributions = bluePlayerCols.map((c, i) => ({
+      username: bluePlayers[i],
+      contribution: Math.round(parseSheetNumber(cell(r, c)))
+    }));
+
+    const redTotal = Math.round(parseSheetNumber(cell(r, redTotalCol)));
+    const redAwarded = Math.round(parseSheetNumber(cell(r, redPointsCol)));
+    const redContributions = redPlayerCols.map((c, i) => ({
+      username: redPlayers[i],
+      contribution: Math.round(parseSheetNumber(cell(r, c)))
+    }));
+
+    tasks.push({
+      name: taskName,
+      points,
+      position: tasks.length,
+      blue: { total: blueTotal, awarded: blueAwarded, contributions: blueContributions },
+      red: { total: redTotal, awarded: redAwarded, contributions: redContributions }
+    });
+  }
+
+  if (tasks.length === 0) throw new Error('No task rows found in sheet');
+
+  return {
+    teamNames: [blueName, redName],
+    bluePlayers,
+    redPlayers,
+    tasks
+  };
 }
 
 // ============ TEAM ROUTES ============
@@ -1644,6 +1827,162 @@ app.get('/api/proofs/approved', async (req, res) => {
       .order('created_at', { ascending: false });
     res.json(proofs || []);
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ GOOGLE SHEET SYNC ============
+
+app.post('/api/sheet-sync', async (req, res) => {
+  try {
+    const { admin_password } = req.body || {};
+    const config = await getConfig();
+    if (admin_password !== config.admin_password && admin_password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // 1. Fetch + parse the sheet (no DB writes if this throws)
+    let sheet;
+    try {
+      const csv = await fetchSheetCsv();
+      sheet = parseBingoSheet(csv);
+    } catch (parseErr) {
+      return res.status(400).json({ error: `Sheet parse failed: ${parseErr.message}` });
+    }
+
+    const [blueName, redName] = sheet.teamNames;
+
+    // 2. Reconcile teams (preserve color/logo on existing rows)
+    const { data: existingTeams } = await supabase.from('teams').select('*');
+    const findTeam = (name) => (existingTeams || []).find(
+      t => String(t.name).trim().toLowerCase() === String(name).trim().toLowerCase()
+    );
+
+    const teamIdByName = {};
+    for (const [idx, name] of [blueName, redName].entries()) {
+      const existing = findTeam(name);
+      if (existing) {
+        teamIdByName[name] = existing.id;
+      } else {
+        const defaultColor = idx === 0 ? '#3b82f6' : '#ef4444';
+        const { data: created, error } = await supabase.from('teams')
+          .insert({ name, color: defaultColor })
+          .select()
+          .single();
+        if (error) throw new Error(`teams insert: ${error.message}`);
+        teamIdByName[name] = created.id;
+      }
+    }
+
+    // 3. Reconcile players (preserve WOM fields, only touch team_id)
+    const desired = [
+      ...sheet.bluePlayers.map(u => ({ username: u, team_id: teamIdByName[blueName] })),
+      ...sheet.redPlayers.map(u => ({ username: u, team_id: teamIdByName[redName] }))
+    ];
+    const desiredKeys = new Set(desired.map(d => d.username.toLowerCase()));
+
+    const { data: existingPlayers } = await supabase.from('players').select('*');
+    const existingByName = new Map(
+      (existingPlayers || []).map(p => [String(p.username).trim().toLowerCase(), p])
+    );
+
+    for (const d of desired) {
+      const key = d.username.toLowerCase();
+      const existing = existingByName.get(key);
+      if (existing) {
+        if (existing.team_id !== d.team_id) {
+          const { error } = await supabase.from('players')
+            .update({ team_id: d.team_id })
+            .eq('id', existing.id);
+          if (error) throw new Error(`players update: ${error.message}`);
+        }
+      } else {
+        const { error } = await supabase.from('players')
+          .insert({ username: d.username, team_id: d.team_id });
+        if (error) throw new Error(`players insert: ${error.message}`);
+      }
+    }
+
+    const orphanPlayerIds = (existingPlayers || [])
+      .filter(p => !desiredKeys.has(String(p.username).trim().toLowerCase()))
+      .map(p => p.id);
+    if (orphanPlayerIds.length > 0) {
+      const { error } = await supabase.from('players').delete().in('id', orphanPlayerIds);
+      if (error) throw new Error(`players delete: ${error.message}`);
+    }
+
+    // 4. Wipe tiles (cascades to progress, proofs, tile_votes)
+    {
+      const { error } = await supabase.from('tiles').delete().neq('id', 0);
+      if (error) throw new Error(`tiles wipe: ${error.message}`);
+    }
+
+    // 5. Insert tiles in bulk and capture new ids
+    const tileRows = sheet.tasks.map(t => ({
+      name: t.name,
+      points: t.points,
+      position: t.position,
+      type: 'custom',
+      target_value: 1,
+      description: 'Imported from Google Sheet'
+    }));
+    const { data: insertedTiles, error: tilesErr } = await supabase.from('tiles')
+      .insert(tileRows)
+      .select();
+    if (tilesErr) throw new Error(`tiles insert: ${tilesErr.message}`);
+
+    // Map by position so we can link tasks → new tile ids reliably
+    const tileIdByPosition = new Map((insertedTiles || []).map(t => [t.position, t.id]));
+
+    // 6. Insert progress in bulk (two rows per task)
+    const nowIso = new Date().toISOString();
+    const progressRows = [];
+    for (const task of sheet.tasks) {
+      const tileId = tileIdByPosition.get(task.position);
+      if (tileId === undefined) continue;
+      const blueDone = task.blue.awarded > 0;
+      const redDone = task.red.awarded > 0;
+      progressRows.push({
+        tile_id: tileId,
+        team_id: teamIdByName[blueName],
+        current_value: task.blue.total,
+        completed: blueDone,
+        completed_at: blueDone ? nowIso : null,
+        player_contributions: task.blue.contributions
+      });
+      progressRows.push({
+        tile_id: tileId,
+        team_id: teamIdByName[redName],
+        current_value: task.red.total,
+        completed: redDone,
+        completed_at: redDone ? nowIso : null,
+        player_contributions: task.red.contributions
+      });
+    }
+    if (progressRows.length > 0) {
+      const { error: progErr } = await supabase.from('progress').insert(progressRows);
+      if (progErr) throw new Error(`progress insert: ${progErr.message}`);
+    }
+
+    // 7. Log + respond
+    await logActivity(
+      'SHEET_SYNC',
+      `Synkroniseret ${sheet.tasks.length} felter og ${sheet.bluePlayers.length + sheet.redPlayers.length} spillere fra Google Sheet`,
+      'Admin'
+    );
+
+    res.json({
+      success: true,
+      teams: [
+        { id: teamIdByName[blueName], name: blueName },
+        { id: teamIdByName[redName], name: redName }
+      ],
+      tiles_synced: sheet.tasks.length,
+      players_synced: sheet.bluePlayers.length + sheet.redPlayers.length,
+      progress_rows: progressRows.length
+    });
+  } catch (error) {
+    console.error('Sheet sync error:', error);
     res.status(500).json({ error: error.message });
   }
 });

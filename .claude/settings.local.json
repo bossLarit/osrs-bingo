@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npm run:*)",
-      "Bash(node --check server.js)"
+      "Bash(node --check server.js)",
+      "WebFetch(domain:docs.google.com)",
+      "WebFetch(domain:doc-10-00-sheets.googleusercontent.com)"
     ]
   }
 }
