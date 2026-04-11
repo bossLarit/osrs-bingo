@@ -17,9 +17,73 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '2005';
 const SITE_PIN = process.env.SITE_PIN || '1234';
 
-// Google Sheet sync config
-const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID || '1mMFYiCGox0ejYNSjOGHQXVTsv9-JMGDVYYB_dcy3oIA';
-const GOOGLE_SHEET_GID = process.env.GOOGLE_SHEET_GID || '0';
+// =========================================================================
+// BINGO CONFIGURATION — edit this block when starting a new bingo
+// -------------------------------------------------------------------------
+// Setup checklist for a new bingo:
+//   1. Update googleSheetId / googleSheetGid below to point at the new sheet.
+//   2. Make sure the new sheet uses the same column layout as the previous
+//      one (the parser auto-detects player columns by scanning the header
+//      row for "Hold Blå total" / "Hold Rød total" sentinels):
+//        - Row with team names in col B, total points in col C
+//        - Header row with player names + the two "Hold X total" markers
+//        - Task rows: name in B, point value in C, per-player numbers,
+//          team total, points awarded
+//   3. Add/remove entries in `womTiles` if your WOM-driven tiles changed.
+//      Each entry is auto-created on the next sheet sync and populated from
+//      Wise Old Man data instead of the sheet row. The matching sheet row
+//      (by `sheetNameMatch` regex) is dropped to avoid duplicates.
+//   4. Run POST /api/bingo/start to set baselines from current WOM data.
+//   5. Click "Sync fra Sheet" in TileManager — sheet tiles get imported,
+//      WOM tiles get auto-created and populated.
+// =========================================================================
+const BINGO_CONFIG = {
+  // The public Google Sheet that the host fills in.
+  // ID and GID are in the URL: docs.google.com/spreadsheets/d/<ID>/edit#gid=<GID>
+  googleSheetId: '1mMFYiCGox0ejYNSjOGHQXVTsv9-JMGDVYYB_dcy3oIA',
+  googleSheetGid: '0',
+
+  // WOM-driven tiles. Each entry:
+  //   - sheetNameMatch: regex matched against the task name in the sheet.
+  //                     Matching rows are SKIPPED during sheet import.
+  //   - tile:           the tile to ensure exists in the database. Created
+  //                     once on first sync if no tile with the same
+  //                     (type, metric) already exists. Existing rows are
+  //                     left alone so you can rename / re-point in the UI.
+  womTiles: [
+    {
+      sheetNameMatch: /mest\s+total\s+skill\s+xp/i,
+      tile: {
+        name: 'Mest total skill xp',
+        type: 'xp',
+        metric: 'overall',
+        target_value: 0,
+        points: 3,
+        description: 'Most total skill XP gained since bingo start (WOM)'
+      }
+    },
+    {
+      sheetNameMatch: /mest\s+ehb\s+gain/i,
+      tile: {
+        name: 'Mest EHB gain',
+        type: 'ehb',
+        metric: 'ehb',
+        target_value: 0,
+        points: 3,
+        description: 'Most EHB (Efficient Hours Bossing) gained since bingo start (WOM)'
+      }
+    }
+  ],
+
+  // Defensive: team names that earlier sync runs may have auto-created.
+  // Cleaned up on every sync and never selected as the blue/red role.
+  // Match is case-insensitive and whitespace-collapsed.
+  leftoverTeamNames: ['hold blå', 'hold blaa', 'hold rød', 'hold roed']
+};
+
+// Env vars override BINGO_CONFIG for staging / per-deployment use
+const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID || BINGO_CONFIG.googleSheetId;
+const GOOGLE_SHEET_GID = process.env.GOOGLE_SHEET_GID || BINGO_CONFIG.googleSheetGid;
 
 console.log('Connected to Supabase:', supabaseUrl);
 
@@ -192,11 +256,16 @@ function parseBingoSheet(csvText) {
 
   // Task rows start at headerRowIdx + 2 (skipping the "Task,Point" sub-header)
   const looksLikeUrl = (s) => /https?:\/\/|www\.|\.(com|net|org|io)\b|temple|wiseoldman/i.test(s);
+  // Sheet rows whose name matches a WOM-driven tile (see BINGO_CONFIG.womTiles)
+  // are handled by auto-created WOM tiles and must NOT be imported from the sheet.
+  const isWomDrivenName = (s) =>
+    BINGO_CONFIG.womTiles.some(w => w.sheetNameMatch.test(s));
   const tasks = [];
   for (let r = headerRowIdx + 2; r < rows.length; r++) {
     const taskName = cell(r, 1);
     if (!taskName) continue; // separator/empty row
     if (looksLikeUrl(taskName)) continue; // player profile link rows at the bottom
+    if (isWomDrivenName(taskName)) continue; // handled by manually-created WOM tile
     const points = Math.round(parseSheetNumber(cell(r, 2)));
 
     const blueTotal = Math.round(parseSheetNumber(cell(r, blueTotalCol)));
@@ -1131,131 +1200,145 @@ app.post('/api/sync', async (req, res) => {
   }
 });
 
-app.post('/api/sync/progress', async (req, res) => {
-  try {
-    const config = await getConfig();
-    if (!config.event_start) {
-      return res.status(400).json({ error: 'Bingo event not started' });
-    }
-    
-    const { data: tiles } = await supabase.from('tiles').select('*');
-    const { data: teams } = await supabase.from('teams').select('*');
-    const { data: players } = await supabase.from('players').select('*');
-    
-    const results = [];
-    
-    // Check if event has ended (for competition tile resolution)
-    const eventEnded = config.event_end && new Date(config.event_end) <= new Date();
+async function recomputeWomProgress() {
+  const config = await getConfig();
+  if (!config.event_start) {
+    return { skipped: true, reason: 'event_not_started' };
+  }
 
-    for (const tile of (tiles || [])) {
-      // Only auto-track tiles with a known WOM-trackable type and a valid metric
-      const trackableTypes = ['xp', 'level', 'experience', 'kills', 'kc'];
-      if (!trackableTypes.includes(tile.type) || !tile.metric) continue;
+  const { data: tiles } = await supabase.from('tiles').select('*');
+  const { data: teams } = await supabase.from('teams').select('*');
+  const { data: players } = await supabase.from('players').select('*');
 
-      const isCompetition = tile.target_value === 0 || tile.target_value === null;
-      const teamProgress = {};
+  const results = [];
 
-      // Calculate progress for each team based on their players
-      const teamPlayerContributions = {};
+  // Check if event has ended (for competition tile resolution)
+  const eventEnded = config.event_end && new Date(config.event_end) <= new Date();
 
-      for (const team of (teams || [])) {
-        const teamPlayers = (players || []).filter(p => p.team_id === team.id);
-        let teamTotal = 0;
-        const playerContributions = [];
+  for (const tile of (tiles || [])) {
+    // Only auto-track tiles with a known WOM-trackable type and a valid metric
+    const trackableTypes = ['xp', 'level', 'experience', 'kills', 'kc', 'ehb'];
+    if (!trackableTypes.includes(tile.type) || !tile.metric) continue;
 
-        for (const player of teamPlayers) {
-          const current = player.current_stats;
-          const baseline = player.baseline_stats;
+    const isCompetition = tile.target_value === 0 || tile.target_value === null;
+    const teamProgress = {};
 
-          if (!current || !baseline) {
-            playerContributions.push({ username: player.username, contribution: 0 });
-            continue;
-          }
+    // Calculate progress for each team based on their players
+    const teamPlayerContributions = {};
 
-          let gain = 0;
-          const metric = tile.metric.toLowerCase();
+    for (const team of (teams || [])) {
+      const teamPlayers = (players || []).filter(p => p.team_id === team.id);
+      let teamTotal = 0;
+      const playerContributions = [];
 
-          if (tile.type === 'xp' || tile.type === 'level' || tile.type === 'experience') {
-            if (!metric || metric === 'overall') {
-              // Total skill XP: sum all skills
-              const currentTotal = Object.values(current?.skills || {}).reduce((sum, s) => sum + (s.experience || 0), 0);
-              const baselineTotal = Object.values(baseline?.skills || {}).reduce((sum, s) => sum + (s.experience || 0), 0);
-              gain = currentTotal - baselineTotal;
-            } else {
-              const currentXp = current?.skills?.[metric]?.experience || 0;
-              const baselineXp = baseline?.skills?.[metric]?.experience || 0;
-              gain = currentXp - baselineXp;
-            }
-          } else if (tile.type === 'kills' || tile.type === 'kc') {
-            const currentKc = current?.bosses?.[metric]?.kills || 0;
-            const baselineKc = baseline?.bosses?.[metric]?.kills || 0;
-            gain = currentKc - baselineKc;
-          }
+      for (const player of teamPlayers) {
+        const current = player.current_stats;
+        const baseline = player.baseline_stats;
 
-          const playerGain = Math.max(0, gain);
-          teamTotal += playerGain;
-          playerContributions.push({ username: player.username, contribution: playerGain });
+        if (!current || !baseline) {
+          playerContributions.push({ username: player.username, contribution: 0 });
+          continue;
         }
 
-        teamProgress[team.id] = teamTotal;
-        teamPlayerContributions[team.id] = playerContributions;
+        let gain = 0;
+        const metric = tile.metric.toLowerCase();
+
+        if (tile.type === 'xp' || tile.type === 'level' || tile.type === 'experience') {
+          if (!metric || metric === 'overall') {
+            // Total skill XP: sum all skills
+            const currentTotal = Object.values(current?.skills || {}).reduce((sum, s) => sum + (s.experience || 0), 0);
+            const baselineTotal = Object.values(baseline?.skills || {}).reduce((sum, s) => sum + (s.experience || 0), 0);
+            gain = currentTotal - baselineTotal;
+          } else {
+            const currentXp = current?.skills?.[metric]?.experience || 0;
+            const baselineXp = baseline?.skills?.[metric]?.experience || 0;
+            gain = currentXp - baselineXp;
+          }
+        } else if (tile.type === 'kills' || tile.type === 'kc') {
+          const currentKc = current?.bosses?.[metric]?.kills || 0;
+          const baselineKc = baseline?.bosses?.[metric]?.kills || 0;
+          gain = currentKc - baselineKc;
+        } else if (tile.type === 'ehb') {
+          // WOM stores EHB at latestSnapshot.data.computed.ehb.value (decimal hours).
+          // current_value is INTEGER so this floors via Math.max + integer cast.
+          const currentEhb = current?.computed?.ehb?.value || 0;
+          const baselineEhb = baseline?.computed?.ehb?.value || 0;
+          gain = currentEhb - baselineEhb;
+        }
+
+        const playerGain = Math.max(0, gain);
+        teamTotal += playerGain;
+        playerContributions.push({ username: player.username, contribution: playerGain });
       }
 
-      // Update progress in database
-      for (const team of (teams || [])) {
-        const currentValue = teamProgress[team.id] || 0;
-        let completed = false;
+      teamProgress[team.id] = teamTotal;
+      teamPlayerContributions[team.id] = playerContributions;
+    }
 
-        if (isCompetition) {
-          // Competition tile: only resolve winner when event has ended
-          if (eventEnded) {
-            const maxValue = Math.max(...Object.values(teamProgress));
-            completed = currentValue > 0 && currentValue === maxValue;
-          }
-          // During event: just track current_value, don't mark completed
-        } else {
-          // Target tile: first to reach target wins
-          completed = currentValue >= tile.target_value;
+    // Update progress in database
+    for (const team of (teams || [])) {
+      const currentValue = teamProgress[team.id] || 0;
+      let completed = false;
+
+      if (isCompetition) {
+        // Competition tile: only resolve winner when event has ended
+        if (eventEnded) {
+          const maxValue = Math.max(...Object.values(teamProgress));
+          completed = currentValue > 0 && currentValue === maxValue;
         }
+        // During event: just track current_value, don't mark completed
+      } else {
+        // Target tile: first to reach target wins
+        completed = currentValue >= tile.target_value;
+      }
 
-        // Upsert progress
-        const { data: existing } = await supabase.from('progress')
-          .select('*')
-          .eq('tile_id', tile.id)
-          .eq('team_id', team.id);
+      // Upsert progress
+      const { data: existing } = await supabase.from('progress')
+        .select('*')
+        .eq('tile_id', tile.id)
+        .eq('team_id', team.id);
 
-        const contributions = teamPlayerContributions[team.id] || [];
+      const contributions = teamPlayerContributions[team.id] || [];
 
-        if (existing && existing.length > 0) {
-          // Don't overwrite tiles already completed (manual assignments stay)
-          if (!existing[0].completed) {
-            await supabase.from('progress')
-              .update({
-                current_value: currentValue,
-                completed,
-                completed_at: completed ? new Date().toISOString() : null,
-                player_contributions: contributions
-              })
-              .eq('id', existing[0].id);
-          }
-        } else {
+      if (existing && existing.length > 0) {
+        // Don't overwrite tiles already completed (manual assignments stay)
+        if (!existing[0].completed) {
           await supabase.from('progress')
-            .insert({
-              tile_id: tile.id,
-              team_id: team.id,
+            .update({
               current_value: currentValue,
               completed,
               completed_at: completed ? new Date().toISOString() : null,
               player_contributions: contributions
-            });
+            })
+            .eq('id', existing[0].id);
         }
+      } else {
+        await supabase.from('progress')
+          .insert({
+            tile_id: tile.id,
+            team_id: team.id,
+            current_value: currentValue,
+            completed,
+            completed_at: completed ? new Date().toISOString() : null,
+            player_contributions: contributions
+          });
       }
-
-      results.push({ tile: tile.name, type: tile.type, isCompetition, teamProgress });
     }
-    
-    await logActivity('PROGRESS_SYNC', `Progress beregnet for ${results.length} tiles`);
-    res.json({ success: true, results });
+
+    results.push({ tile: tile.name, type: tile.type, isCompetition, teamProgress });
+  }
+
+  await logActivity('PROGRESS_SYNC', `Progress beregnet for ${results.length} tiles`);
+  return { success: true, results };
+}
+
+app.post('/api/sync/progress', async (req, res) => {
+  try {
+    const result = await recomputeWomProgress();
+    if (result.skipped) {
+      return res.status(400).json({ error: 'Bingo event not started' });
+    }
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1869,7 +1952,7 @@ app.post('/api/sheet-sync', async (req, res) => {
     const redness  = (t) => { const c = rgbFromHex(t.color); return c ? c.r - Math.max(c.g, c.b) : -Infinity; };
     const isLeftoverName = (n) => {
       const s = String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
-      return s === 'hold blå' || s === 'hold blaa' || s === 'hold rød' || s === 'hold roed';
+      return BINGO_CONFIG.leftoverTeamNames.includes(s);
     };
 
     // Prefer non-leftover teams when picking blue/red roles
@@ -1968,10 +2051,20 @@ app.post('/api/sheet-sync', async (req, res) => {
       if (error) throw new Error(`players delete: ${error.message}`);
     }
 
-    // 4. Wipe tiles (cascades to progress, proofs, tile_votes)
+    // 4. Selective wipe: delete sheet-derived tiles only, preserve WOM-tracked tiles
+    //    so manually-created xp/ehb/kc/etc tiles (and their progress/proofs/votes) survive.
     {
-      const { error } = await supabase.from('tiles').delete().neq('id', 0);
-      if (error) throw new Error(`tiles wipe: ${error.message}`);
+      const { data: existingTilesForWipe } = await supabase.from('tiles').select('id, type, metric');
+      const isWomTracked = (t) =>
+        ['xp', 'level', 'experience', 'kills', 'kc', 'ehb'].includes(t.type) &&
+        t.metric && String(t.metric).trim() !== '';
+      const idsToDelete = (existingTilesForWipe || [])
+        .filter(t => !isWomTracked(t))
+        .map(t => t.id);
+      if (idsToDelete.length > 0) {
+        const { error } = await supabase.from('tiles').delete().in('id', idsToDelete);
+        if (error) throw new Error(`tiles wipe: ${error.message}`);
+      }
     }
 
     // 5. Insert tiles in bulk and capture new ids
@@ -2031,7 +2124,50 @@ app.post('/api/sheet-sync', async (req, res) => {
       if (progErr) throw new Error(`progress insert: ${progErr.message}`);
     }
 
-    // 7. Log + respond
+    // 7. Ensure WOM-driven tiles from BINGO_CONFIG.womTiles exist. Match existing
+    //    tiles by (type, metric) so user-renamed/repointed rows aren't duplicated.
+    const womTilesCreated = [];
+    {
+      const { data: allTilesNow } = await supabase.from('tiles').select('id, type, metric');
+      const existingByTypeMetric = new Map(
+        (allTilesNow || []).map(t => [`${t.type}|${String(t.metric || '').toLowerCase()}`, t])
+      );
+      const sheetMaxPosition = sheet.tasks.length;
+      const womInserts = [];
+      BINGO_CONFIG.womTiles.forEach((w, idx) => {
+        const key = `${w.tile.type}|${String(w.tile.metric || '').toLowerCase()}`;
+        if (existingByTypeMetric.has(key)) return;
+        womInserts.push({
+          name: w.tile.name,
+          type: w.tile.type,
+          metric: w.tile.metric,
+          target_value: w.tile.target_value ?? 0,
+          points: w.tile.points ?? 1,
+          description: w.tile.description || 'WOM-driven tile',
+          position: sheetMaxPosition + idx
+        });
+      });
+      if (womInserts.length > 0) {
+        const { data: createdWom, error: womErr } = await supabase.from('tiles')
+          .insert(womInserts)
+          .select();
+        if (womErr) throw new Error(`wom tiles insert: ${womErr.message}`);
+        womTilesCreated.push(...(createdWom || []).map(t => t.name));
+      }
+    }
+
+    // 8. Auto-recompute WOM progress so xp/ehb tiles update immediately.
+    //    Don't fail the sheet sync if this throws — sheet data is the primary thing.
+    let womResult = { skipped: true };
+    let womError = null;
+    try {
+      womResult = await recomputeWomProgress();
+    } catch (e) {
+      console.error('WOM progress recompute after sheet sync failed:', e);
+      womError = e.message;
+    }
+
+    // 9. Log + respond
     await logActivity(
       'SHEET_SYNC',
       `Synkroniseret ${sheet.tasks.length} felter og ${sheet.bluePlayers.length + sheet.redPlayers.length} spillere fra Google Sheet`,
@@ -2046,7 +2182,10 @@ app.post('/api/sheet-sync', async (req, res) => {
       ],
       tiles_synced: sheet.tasks.length,
       players_synced: sheet.bluePlayers.length + sheet.redPlayers.length,
-      progress_rows: progressRows.length
+      progress_rows: progressRows.length,
+      wom_tiles_created: womTilesCreated,
+      wom_progress_synced: !womResult.skipped && !womError,
+      wom_progress_error: womError
     });
   } catch (error) {
     console.error('Sheet sync error:', error);
