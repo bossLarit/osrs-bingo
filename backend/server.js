@@ -1991,30 +1991,40 @@ app.post('/api/sheet-sync', async (req, res) => {
     // Map by position so we can link tasks → new tile ids reliably
     const tileIdByPosition = new Map((insertedTiles || []).map(t => [t.position, t.id]));
 
-    // 6. Insert progress in bulk (two rows per task)
+    // 6. Insert progress rows. Skip teams with no data so untouched tiles render
+    //    neutral (no team color/badge) instead of being arbitrarily "assigned".
     const nowIso = new Date().toISOString();
     const progressRows = [];
+    const hasAnyData = (side) =>
+      side.total > 0 ||
+      side.awarded > 0 ||
+      side.contributions.some(c => (c.contribution || 0) > 0);
+
     for (const task of sheet.tasks) {
       const tileId = tileIdByPosition.get(task.position);
       if (tileId === undefined) continue;
       const blueDone = task.blue.awarded > 0;
       const redDone = task.red.awarded > 0;
-      progressRows.push({
-        tile_id: tileId,
-        team_id: teamIdByName[blueName],
-        current_value: task.blue.total,
-        completed: blueDone,
-        completed_at: blueDone ? nowIso : null,
-        player_contributions: task.blue.contributions
-      });
-      progressRows.push({
-        tile_id: tileId,
-        team_id: teamIdByName[redName],
-        current_value: task.red.total,
-        completed: redDone,
-        completed_at: redDone ? nowIso : null,
-        player_contributions: task.red.contributions
-      });
+      if (hasAnyData(task.blue)) {
+        progressRows.push({
+          tile_id: tileId,
+          team_id: blueTeamId,
+          current_value: task.blue.total,
+          completed: blueDone,
+          completed_at: blueDone ? nowIso : null,
+          player_contributions: task.blue.contributions
+        });
+      }
+      if (hasAnyData(task.red)) {
+        progressRows.push({
+          tile_id: tileId,
+          team_id: redTeamId,
+          current_value: task.red.total,
+          completed: redDone,
+          completed_at: redDone ? nowIso : null,
+          player_contributions: task.red.contributions
+        });
+      }
     }
     if (progressRows.length > 0) {
       const { error: progErr } = await supabase.from('progress').insert(progressRows);
